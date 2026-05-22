@@ -1,0 +1,33 @@
+# AI Werewolf Game Configuration
+
+api:
+  base_url: "https://api.killerbest.com"
+  api_key: ""  # Set via environment variable WEREWOLF_API_KEY
+  default_timeout: 60
+  model_timeout_map:
+    bl-DeepSeek-R1: 600
+    bl-DeepSeek-R1-0528: 600
+    bl-DeepSeek-V3-250324: 60
+    bl-DeepSeek-V3.1-Terminus: 60
+    bl-DeepSeek-V3.1: 60
+    bl-DeepSeek-V3.2-Exp: 60
+
+models:  # Configured model id pool used for random/manual AI assignment
+  - bl-DeepSeek-V3-250324
+  - bl-DeepSeek-V3.1-Terminus
+  - bl-DeepSeek-V3.1
+  - bl-DeepSeek-V3.2-Exp
+
+game:
+  default_players: 12
+  default_wolves: 3
+  human_action_timeout: 120  # seconds for human player to act
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  game_expire_hours: 1  # expire finished games after 1 hour
+
+database:
+  path: ./logs/games.db

@@ -1,0 +1,61 @@
+# ---- General ----
+*.log
+*.tmp
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+*.iml
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python tooling
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Backend data / runtime
+backend/logs/
+backend/*.db
+backend/**/games.db
+backend/data/game_history.json
+backend/data/game_stats.json
+
+# Config / secrets (if you add them later)
+.env
+.env.local
+.env.*.local
+
+# Allow .env.example to be committed
+!.env.example
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Vite / build caches
+frontend/.vite/
+
+# OS-specific
+ehthumbs.db
+Desktop.ini
+
+# Misc
+*.bak
+*.orig
+llm_raw_*.log
