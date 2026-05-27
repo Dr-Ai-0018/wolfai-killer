@@ -563,6 +563,21 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { gameApi, GameWebSocket, getAvatarUrl } from '@/api'
 import { buildDaySummary, parseVoteSnapshot } from '@/gamePlay'
+import {
+  buildSpeechBubble,
+  canSelectTarget,
+  formatCountdown as formatTime,
+  getLogClass as getLogClassName,
+  getLogTextClass as getLogTextClassName,
+  getPhaseText,
+  getPlayerBorderClass as getPlayerBorderClassName,
+  getPlayerIcon as getPlayerIconName,
+  getPlayerPositionStyle,
+  getRoleAnnouncementIcon,
+  getRoleIcon,
+  getVoteLineCoords as buildVoteLineCoords,
+  toggleAllowedSeat,
+} from '@/gamePlayUi'
 import { applyRoleResult, buildActionRequiredSnapshot, buildConnectedSnapshot, buildStateSnapshot, fetchInitialPlayerContext } from '@/gameRealtime'
 import { explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
 import { buildGodModeDisplayState, fetchAfterlifeActions, fetchGodModeBundle } from '@/gameSpectator'
@@ -629,16 +644,7 @@ let timerInterval = null
 const logContainer = ref(null)
 
 // Computed
-const phaseText = computed(() => {
-  const phases = {
-    waiting: '等待开始',
-    night: '夜晚阶段',
-    day: '白天阶段',
-    vote: '投票阶段',
-    ended: '游戏结束',
-  }
-  return phases[gameState.value.phase] || gameState.value.phase
-})
+const phaseText = computed(() => getPhaseText(gameState.value.phase))
 
 const needsTargetSelection = computed(() => {
   if (!pendingAction.value) return false
@@ -689,64 +695,16 @@ const myPublicRoleEvents = computed(() => {
 })
 
 // Methods
-const getLogClass = (log) => {
-  const classes = {
-    death: 'bg-gradient-to-r from-red-950/60 to-red-900/30 border border-red-800/50',
-    speech: 'bg-slate-900/40',
-    vote: 'bg-blue-950/40 border border-blue-800/30',
-    phase: 'bg-gradient-to-r from-violet-950/50 to-purple-900/30 border border-violet-700/30',
-    system: 'bg-slate-800/30',
-    end: 'bg-gradient-to-r from-amber-950/50 to-yellow-900/30 border border-amber-700/40',
-    reveal: 'bg-gradient-to-r from-emerald-950/50 to-green-900/30 border border-emerald-700/30',
-    eliminate: 'border border-red-700/40',
-    hunter: 'bg-orange-950/40 border border-orange-700/30',
-  }
-  return classes[log.type] || 'bg-slate-800/30'
-}
+const getLogClass = (log) => getLogClassName(log.type)
 
-const getLogTextClass = (log) => {
-  const classes = {
-    phase: 'text-violet-300 font-medium',
-    system: 'text-slate-400',
-    death: 'text-red-300',
-    end: 'text-amber-300 font-bold',
-  }
-  return classes[log.type] || 'text-slate-300'
-}
+const getLogTextClass = (log) => getLogTextClassName(log.type)
 
 const getPlayerPosition = (index, total) => {
-  const angle = (index * 2 * Math.PI / total) - Math.PI / 2
-  const radius = 250
-  const x = 300 + radius * Math.cos(angle)
-  const y = 300 + radius * Math.sin(angle)
-  return { left: `${x}px`, top: `${y}px` }
-}
-
-const getPlayerCenterCoords = (seat) => {
-  const index = seat - 1
-  const total = players.value.length || 12
-  const angle = (index * 2 * Math.PI / total) - Math.PI / 2
-  const radius = 250
-  return {
-    x: 300 + radius * Math.cos(angle),
-    y: 300 + radius * Math.sin(angle)
-  }
+  return getPlayerPositionStyle(index, total)
 }
 
 const getVoteLineCoords = (voter, target) => {
-  const from = getPlayerCenterCoords(parseInt(voter))
-  const to = getPlayerCenterCoords(parseInt(target))
-  // Shorten line to not overlap with avatars
-  const dx = to.x - from.x
-  const dy = to.y - from.y
-  const len = Math.sqrt(dx * dx + dy * dy)
-  const ratio = 45 / len  // 45px offset for avatar radius
-  return {
-    x1: from.x + dx * ratio,
-    y1: from.y + dy * ratio,
-    x2: to.x - dx * ratio,
-    y2: to.y - dy * ratio
-  }
+  return buildVoteLineCoords(voter, target, players.value.length || 12)
 }
 
 const parseVotesFromLogs = () => {
@@ -756,67 +714,20 @@ const parseVotesFromLogs = () => {
 }
 
 const showSpeechBubble = (seat, content) => {
-  speechBubble.value = { show: true, seat, content: content.substring(0, 30) + '...' }
+  speechBubble.value = buildSpeechBubble(seat, content)
   latestSpeaker.value = seat
   setTimeout(() => {
     speechBubble.value = { show: false, seat: null, content: '' }
   }, 3000)
 }
 
-const getPlayerIcon = (player) => {
-  if (!player.alive) return '💀'
-  if (player.seat === mySeat.value) return '👤'
-  return '🤖'
-}
-
 const handleImageError = (e) => {
   e.target.style.display = 'none'
 }
 
-const getPlayerBorderClass = (player) => {
-  if (!player.alive) return 'border-gray-600'
-  if (player.seat === mySeat.value) return 'border-game-accent'
-  return 'border-game-border'
-}
+const getPlayerIcon = (player) => getPlayerIconName(player, mySeat.value)
 
-const getRoleIcon = (role) => {
-  const icons = {
-    '狼人': '🐺',
-    '村民': '👨‍🌾',
-    '预言家': '🔮',
-    '女巫': '🧙‍♀️',
-    '猎人': '🏹',
-    '守卫': '🛡️',
-    '狐狸': '🦊',
-    '天使': '😇',
-    '替罪羊': '🐐',
-    '丘比特': '💘',
-    '白痴': '🤪',
-    '长老': '👴',
-    '圣徒': '⛪',
-    '野孩子': '🧒',
-    '共济会': '🤝',
-    '被诅咒者': '🕯️',
-    '受祝福者': '✨',
-  }
-  return icons[role] || '❓'
-}
-
-const getRoleAnnouncementIcon = (role) => {
-  const icons = {
-    '守卫': '🛡️',
-    '狼人': '🐺',
-    '预言家': '🔮',
-    '女巫': '🧙‍♀️',
-    '猎人': '🏹',
-    '狐狸': '🦊',
-    '天使': '😇',
-    '替罪羊': '🐐',
-    '丘比特': '💘',
-    '野孩子': '🧒',
-  }
-  return icons[role] || '🌙'
-}
+const getPlayerBorderClass = (player) => getPlayerBorderClassName(player, mySeat.value)
 
 const loadAfterlifeReview = async () => {
   try {
@@ -828,21 +739,8 @@ const loadAfterlifeReview = async () => {
   }
 }
 
-const formatTime = (seconds) => {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
 const selectTarget = (player) => {
-  if (!needsTargetSelection.value) return
-  if (!player.alive && pendingAction.value?.action_type !== 'hunter') return
-  if (player.seat === mySeat.value && pendingAction.value?.action_type !== 'guard') return
-  
-  // Check if valid candidate
-  const candidates = pendingAction.value?.options?.candidates || []
-  if (candidates.length > 0 && !candidates.includes(player.seat)) return
-  
+  if (!canSelectTarget(player, mySeat.value, pendingAction.value, needsTargetSelection.value)) return
   selectedTarget.value = player.seat
 }
 
@@ -863,12 +761,7 @@ const submitTargetAction = () => {
 const toggleAllowedVoter = (seat) => {
   if (!pendingAction.value || pendingAction.value.action_type !== 'scapegoat') return
   const candidates = pendingAction.value.options?.candidates || []
-  if (!candidates.includes(seat)) return
-  if (selectedAllowedVoters.value.includes(seat)) {
-    selectedAllowedVoters.value = selectedAllowedVoters.value.filter((item) => item !== seat)
-  } else {
-    selectedAllowedVoters.value = [...selectedAllowedVoters.value, seat]
-  }
+  selectedAllowedVoters.value = toggleAllowedSeat(selectedAllowedVoters.value, candidates, seat)
 }
 
 const submitScapegoatChoice = () => {
