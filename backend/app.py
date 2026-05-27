@@ -28,6 +28,12 @@ from admin_auth_routes import (
     build_admin_verify_payload,
 )
 from app_create import build_create_game_response, build_game_setup_kwargs, resolve_god_mode_password
+from app_game_control import (
+    pause_game_response,
+    resume_game_response,
+    start_game_response,
+    submit_action_response,
+)
 from app_game_read import (
     get_game_log_response,
     get_game_player_view_response,
@@ -56,7 +62,6 @@ from app_requests import (
     GodModeVerifyRequest,
     validate_role_balance,
 )
-from game_control import build_success_response, submit_waiting_human_action
 from game_engine import GameEngine
 from game_stats import stats_manager
 from game_views import (
@@ -382,33 +387,25 @@ async def get_game_log(game_id: str, offset: int = 0, limit: int = 100):
 @app.post("/api/game/{game_id}/start")
 async def start_game(game_id: str):
     """Start the game"""
-    engine = get_engine_or_404(game_manager, game_id)
-    # Start game in background
-    asyncio.create_task(engine.start())
-    return build_success_response("Game started")
+    return await start_game_response(game_manager, game_id, asyncio.create_task)
 
 
 @app.post("/api/game/{game_id}/pause")
 async def pause_game(game_id: str):
     """Pause the game"""
-    engine = get_engine_or_404(game_manager, game_id)
-    engine.pause()
-    return build_success_response("Game paused")
+    return pause_game_response(game_manager, game_id)
 
 
 @app.post("/api/game/{game_id}/resume")
 async def resume_game(game_id: str):
     """Resume the game"""
-    engine = get_engine_or_404(game_manager, game_id)
-    engine.resume()
-    return build_success_response("对局已继续")
+    return resume_game_response(game_manager, game_id)
 
 
 @app.post("/api/game/{game_id}/action")
 async def submit_action(game_id: str, request: ActionRequest):
     """Submit human player action (REST fallback)"""
-    engine = get_engine_or_404(game_manager, game_id)
-    return submit_waiting_human_action(engine, request.data)
+    return submit_action_response(game_manager, game_id, request.data)
 
 
 # ========== JWT Authentication ==========
