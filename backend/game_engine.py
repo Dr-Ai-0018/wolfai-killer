@@ -1430,15 +1430,9 @@ class GameEngine:
     async def witch_action_with_phantom(self):
         """女巫行动 - 包含死亡角色的虚拟行动"""
         witch = self.get_player_by_role_any(Role.WITCH)
-        if not witch:
-            await asyncio.sleep(random.uniform(4.0, 8.0))
-            return
-        
-        candidates = [s for s in self.get_alive_seats() if s != witch.seat]
-        
-        if witch.alive:
-            # 存活女巫 - 真实行动
-            # Heal
+
+        async def run_live_action():
+            candidates = [s for s in self.get_alive_seats() if s != witch.seat]
             if witch.has_heal and self.night_kill_target:
                 if witch.is_human:
                     response = await self.wait_for_human(witch.seat, "witch_heal", {
@@ -1459,8 +1453,7 @@ class GameEngine:
                         is_public=False,
                         meta={"actor_role": "女巫", "target": self.night_kill_target, "action": "heal"},
                     )
-            
-            # Poison
+
             if witch.has_poison:
                 if witch.is_human:
                     response = await self.wait_for_human(witch.seat, "witch_poison", {
@@ -1481,26 +1474,24 @@ class GameEngine:
                         is_public=False,
                         meta={"actor_role": "女巫", "target": target, "action": "poison"},
                     )
-        else:
-            # 死亡女巫 - 虚拟行动（冥界复盘用）
-            if not witch.is_human:
-                phantom_decisions = []
-                # 虚拟救人决策
-                if self.night_kill_target:
-                    phantom_heal = await self.generate_ai_witch_heal(witch, self.night_kill_target)
-                    phantom_decisions.append(f"{'救' if phantom_heal else '不救'}{self.night_kill_target}号")
-                
-                # 虚拟毒人决策
-                phantom_poison = await self.generate_ai_witch_poison(witch, candidates)
-                if phantom_poison:
-                    phantom_decisions.append(f"毒{phantom_poison}号")
-                else:
-                    phantom_decisions.append("不使用毒药")
-                
-                self.add_phantom_action("女巫", witch.seat, "witch", phantom_poison,
-                                       "；".join(phantom_decisions), self.night_count)
+
+        async def run_dead_ai_phantom():
+            candidates = [s for s in self.get_alive_seats() if s != witch.seat]
+            phantom_decisions = []
+            if self.night_kill_target:
+                phantom_heal = await self.generate_ai_witch_heal(witch, self.night_kill_target)
+                phantom_decisions.append(f"{'救' if phantom_heal else '不救'}{self.night_kill_target}号")
+
+            phantom_poison = await self.generate_ai_witch_poison(witch, candidates)
+            if phantom_poison:
+                phantom_decisions.append(f"毒{phantom_poison}号")
             else:
-                await asyncio.sleep(random.uniform(4.0, 8.0))
+                phantom_decisions.append("不使用毒药")
+
+            self.add_phantom_action("女巫", witch.seat, "witch", phantom_poison,
+                                   "；".join(phantom_decisions), self.night_count)
+
+        await run_phantom_role_action(witch, (4.0, 8.0), run_live_action, run_dead_ai_phantom)
 
     async def resolve_night(self):
         """Resolve night actions and announce deaths"""

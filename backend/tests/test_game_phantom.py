@@ -50,3 +50,22 @@ class GamePhantomTests(unittest.IsolatedAsyncioTestCase):
 
     def test_pick_random_candidate_returns_none_for_empty_candidates(self):
         self.assertIsNone(pick_random_candidate([]))
+
+    async def test_run_phantom_role_action_can_execute_dead_ai_side_effects(self):
+        state = {"summary": None}
+
+        async def live_action():
+            state["summary"] = "live"
+
+        async def dead_ai_action():
+            state["summary"] = "heal;poison"
+
+        exists = await run_phantom_role_action(
+            DummyRolePlayer(alive=False, is_human=False),
+            (1.0, 2.0),
+            live_action,
+            dead_ai_action,
+        )
+
+        self.assertTrue(exists)
+        self.assertEqual(state["summary"], "heal;poison")
