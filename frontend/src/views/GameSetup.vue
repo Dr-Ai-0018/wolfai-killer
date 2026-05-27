@@ -237,7 +237,6 @@ import { useRouter } from 'vue-router'
 import { configApi, gameApi } from '@/api'
 import {
   buildRecommendedRoleConfig,
-  buildSeatModelMap,
   buildWolfOptions,
   canDecreaseRoleCount,
   canIncreaseRoleCount,
@@ -250,6 +249,13 @@ import {
   PLAYER_OPTIONS,
   withBalancedVillagers,
 } from '@/gameSetup'
+import {
+  buildGameCreationPayload,
+  loadSetupResources,
+  sanitizeHumanSeats,
+  toggleHumanSeatSelection,
+  validateGameSetup,
+} from '@/gameSetupFlow'
 
 const router = useRouter()
 
@@ -331,7 +337,7 @@ const passwordError = computed(() => {
 // 总人数变化时调整角色配置
 const onTotalPlayersChange = () => {
   // 清理超出范围的真人座位
-  config.value.humanSeats = config.value.humanSeats.filter(s => s <= config.value.totalPlayers)
+  config.value.humanSeats = sanitizeHumanSeats(config.value.humanSeats, config.value.totalPlayers)
   applyRecommendedSetup(config.value.totalPlayers)
 }
 
@@ -374,12 +380,7 @@ const canDecreaseRole = (code) => {
 }
 
 const toggleHumanSeat = (seat) => {
-  const index = config.value.humanSeats.indexOf(seat)
-  if (index > -1) {
-    config.value.humanSeats.splice(index, 1)
-  } else {
-    config.value.humanSeats.push(seat)
-  }
+  config.value.humanSeats = toggleHumanSeatSelection(config.value.humanSeats, seat)
 }
 
 const applyRecommendedSetup = (totalPlayers) => {
@@ -388,40 +389,19 @@ const applyRecommendedSetup = (totalPlayers) => {
 }
 
 const createGame = async () => {
-  // 验证角色数量
-  if (!roleCountValid.value) {
-    alert('角色数量不匹配，请调整配置')
-    return
-  }
-  if (!wolfCountValid.value) {
-    alert('狼人阵营人数过多，当前人数局不允许')
-    return
-  }
-  
-  // 验证上帝模式密码
-  if (config.value.godMode.enabled && passwordError.value) {
-    alert(passwordError.value)
+  const validationError = validateGameSetup(
+    roleCountValid.value,
+    wolfCountValid.value,
+    config.value.godMode.enabled ? passwordError.value : '',
+  )
+  if (validationError) {
+    alert(validationError)
     return
   }
   
   loading.value = true
   try {
-    const seatModelMap = !config.value.aiConfig.randomModel
-      ? buildSeatModelMap(config.value.seatModelMap)
-      : {}
-    
-    const response = await gameApi.create({
-      total_players: config.value.totalPlayers,
-      num_wolves: config.value.roleConfig.WOLF,
-      role_config: config.value.roleConfig,
-      human_seats: config.value.humanSeats,
-      random_models: config.value.aiConfig.randomModel,
-      seat_model_map: Object.keys(seatModelMap).length > 0 ? seatModelMap : null,
-      god_mode: config.value.godMode.enabled ? {
-        enabled: true,
-        password: config.value.godMode.password
-      } : null
-    })
+    const response = await gameApi.create(buildGameCreationPayload(config.value))
     
     const gameId = response.data.game_id
     router.push(`/game/${gameId}`)
@@ -440,17 +420,9 @@ onMounted(async () => {
   models.value = DEFAULT_MODELS
   
   try {
-    const [rolesRes, modelsRes] = await Promise.all([
-      configApi.getRoles(),
-      configApi.getModels()
-    ])
-    // 只有当返回数据有效时才更新
-    if (rolesRes.data && Array.isArray(rolesRes.data) && rolesRes.data.length > 0) {
-      roles.value = rolesRes.data
-    }
-    if (modelsRes.data && Array.isArray(modelsRes.data) && modelsRes.data.length > 0) {
-      models.value = modelsRes.data
-    }
+    const snapshot = await loadSetupResources(configApi)
+    roles.value = snapshot.roles
+    models.value = snapshot.models
   } catch (error) {
     console.error('加载配置失败：', error)
     // 保持默认数据
