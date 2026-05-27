@@ -22,6 +22,12 @@ import secrets
 
 from admin_auth import create_admin_token, get_admin_password, verify_token
 from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
+from admin_routes import (
+    build_admin_config_updated_response,
+    build_fetch_models_error_response,
+    build_fetch_models_success_response,
+    build_god_mode_verify_response,
+)
 from app_requests import (
     ActionRequest,
     AdminConfigUpdate,
@@ -522,8 +528,8 @@ async def update_admin_config(request: AdminConfigUpdate, _: dict = Depends(get_
         normalize_model_ids=normalize_model_ids,
         set_key_fn=set_key,
     )
-    
-    return {"success": True, "message": "配置已更新"}
+
+    return build_admin_config_updated_response()
 
 
 @app.post("/api/admin/fetch-models")
@@ -536,31 +542,20 @@ async def fetch_remote_models(request: FetchModelsRequest, _: dict = Depends(get
             api_key=request.api_key,
             async_client_cls=httpx.AsyncClient,
         )
-        return {
-            "success": True,
-            "models": model_ids,
-            "model_ids": model_ids,
-            "total": len(model_ids)
-        }
+        return build_fetch_models_success_response(model_ids)
     except ValueError as e:
-        return {"success": False, "message": str(e)}
+        return build_fetch_models_error_response(e)
     except httpx.HTTPStatusError as e:
-        return {"success": False, "message": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
+        return build_fetch_models_error_response(e)
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        return build_fetch_models_error_response(e)
 
 
 @app.post("/api/game/{game_id}/god-mode/verify")
 async def verify_god_mode(game_id: str, request: GodModeVerifyRequest):
     """验证上帝模式密码"""
     engine = get_engine_or_404(game_manager, game_id)
-    if not engine.god_mode_password:
-        return {"success": False, "message": "本局游戏未启用上帝模式"}
-    
-    if request.password == engine.god_mode_password:
-        return {"success": True, "message": "验证成功"}
-    
-    return {"success": False, "message": "密码错误"}
+    return build_god_mode_verify_response(request.password, engine.god_mode_password)
 
 
 @app.get("/api/game/{game_id}/god-mode/logs")
