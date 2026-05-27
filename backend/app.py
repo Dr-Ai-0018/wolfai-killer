@@ -21,6 +21,12 @@ import httpx
 import secrets
 
 from admin_auth import create_admin_token, get_admin_password, verify_token
+from admin_auth_routes import (
+    build_admin_check_payload,
+    build_admin_login_success_payload,
+    build_admin_refresh_payload,
+    build_admin_verify_payload,
+)
 from app_create import build_create_game_response, build_game_setup_kwargs, resolve_god_mode_password
 from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
 from admin_routes import (
@@ -429,11 +435,7 @@ async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(
 @app.get("/api/admin/check")
 async def check_admin_status():
     """Check if admin password is configured"""
-    admin_pwd = get_admin_password()
-    return {
-        "configured": bool(admin_pwd),
-        "message": "管理员密码已配置" if admin_pwd else "请在.env中设置WEREWOLF_ADMIN_PASSWORD"
-    }
+    return build_admin_check_payload(get_admin_password())
 
 
 @app.post("/api/admin/login")
@@ -444,12 +446,7 @@ async def admin_login(request: AdminLoginRequest):
         raise HTTPException(status_code=503, detail="管理员密码未配置，请在.env中设置WEREWOLF_ADMIN_PASSWORD")
     
     if secrets.compare_digest(request.password, admin_pwd):
-        token_data = create_admin_token()
-        return {
-            "success": True, 
-            "message": "登录成功",
-            **token_data
-        }
+        return build_admin_login_success_payload(create_admin_token())
     
     raise HTTPException(status_code=403, detail="密码错误")
 
@@ -457,22 +454,13 @@ async def admin_login(request: AdminLoginRequest):
 @app.post("/api/admin/refresh")
 async def refresh_admin_token(admin: dict = Depends(get_current_admin)):
     """Refresh JWT token"""
-    token_data = create_admin_token()
-    return {
-        "success": True,
-        "message": "登录凭证已刷新",
-        **token_data
-    }
+    return build_admin_refresh_payload(create_admin_token())
 
 
 @app.get("/api/admin/verify")
 async def verify_admin_token(admin: dict = Depends(get_current_admin)):
     """Verify current token is valid"""
-    return {
-        "valid": True,
-        "admin": admin.get("sub"),
-        "expires_at": datetime.fromtimestamp(admin.get("exp", 0)).isoformat()
-    }
+    return build_admin_verify_payload(admin)
 
 
 @app.get("/api/admin/config")
