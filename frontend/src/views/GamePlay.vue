@@ -562,7 +562,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { gameApi, GameWebSocket, getAvatarUrl } from '@/api'
-import { buildDaySummary, parseVoteSnapshot } from '@/gamePlay'
+import { buildDaySummary } from '@/gamePlay'
 import {
   buildSpeechBubble,
   canSelectTarget,
@@ -576,11 +576,19 @@ import {
   getRoleAnnouncementIcon,
   getRoleIcon,
   getVoteLineCoords as buildVoteLineCoords,
-  toggleAllowedSeat,
 } from '@/gamePlayUi'
-import { applyRoleResult, buildActionRequiredSnapshot, buildConnectedSnapshot, buildStateSnapshot, fetchInitialPlayerContext } from '@/gameRealtime'
+import { applyRoleResult, fetchInitialPlayerContext } from '@/gameRealtime'
 import { explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
 import { buildGodModeDisplayState, fetchAfterlifeActions, fetchGodModeBundle } from '@/gameSpectator'
+import {
+  applyActionRequiredEvent,
+  applyConnectedEvent,
+  applyStateEvent,
+  closeGodModePanel,
+  refreshGodModeBundle,
+  scrollLogToBottom,
+  toggleScapegoatSeatSelection,
+} from '@/gameSession'
 
 const route = useRoute()
 const router = useRouter()
@@ -707,20 +715,6 @@ const getVoteLineCoords = (voter, target) => {
   return buildVoteLineCoords(voter, target, players.value.length || 12)
 }
 
-const parseVotesFromLogs = () => {
-  const snapshot = parseVoteSnapshot(gameLogs.value, gameState.value.day_count, displayDaySummary.value)
-  currentVotes.value = snapshot.votes
-  voteCounts.value = snapshot.counts
-}
-
-const showSpeechBubble = (seat, content) => {
-  speechBubble.value = buildSpeechBubble(seat, content)
-  latestSpeaker.value = seat
-  setTimeout(() => {
-    speechBubble.value = { show: false, seat: null, content: '' }
-  }, 3000)
-}
-
 const handleImageError = (e) => {
   e.target.style.display = 'none'
 }
@@ -759,9 +753,7 @@ const submitTargetAction = () => {
 }
 
 const toggleAllowedVoter = (seat) => {
-  if (!pendingAction.value || pendingAction.value.action_type !== 'scapegoat') return
-  const candidates = pendingAction.value.options?.candidates || []
-  selectedAllowedVoters.value = toggleAllowedSeat(selectedAllowedVoters.value, candidates, seat)
+  toggleScapegoatSeatSelection(pendingAction, selectedAllowedVoters, seat)
 }
 
 const submitScapegoatChoice = () => {
@@ -803,11 +795,7 @@ const startGame = async () => {
 // 上帝模式相关方法
 const toggleGodMode = () => {
   if (godModeActive.value) {
-    const nextState = buildGodModeDisplayState(false)
-    godModeActive.value = nextState.active
-    godModeLogs.value = nextState.logs
-    godModePlayers.value = nextState.players
-    showGodModeModal.value = nextState.showPasswordModal
+    closeGodModePanel(godModeActive, godModeLogs, godModePlayers, showGodModeModal)
   } else {
     showGodModeModal.value = true
   }
@@ -832,10 +820,7 @@ const verifyGodModePassword = async () => {
 
 const loadGodModeData = async () => {
   try {
-    const bundle = await fetchGodModeBundle(gameApi, gameId.value, godModePassword.value)
-    godModeLogs.value = bundle.logs
-    godModePlayers.value = bundle.players
-    scrollToBottom()
+    await refreshGodModeBundle(gameApi, gameId.value, godModePassword.value, godModeLogs, godModePlayers, logContainer)
   } catch (error) {
     console.error('加载上帝模式数据失败：', error)
   }
@@ -844,86 +829,44 @@ const loadGodModeData = async () => {
 // 定时刷新上帝模式数据
 let godModeRefreshInterval = null
 
-const scrollToBottom = () => {
-  nextTick(() => {
-    if (logContainer.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight
-    }
-  })
-}
+const scrollToBottom = () => scrollLogToBottom(logContainer)
 
 // WebSocket handlers
 const handleWsConnected = (data) => {
-  wsConnected.value = true
-  mySeat.value = data.seat
-  myRole.value = data.role
-  
-  if (data.game_state) {
-    const snapshot = buildConnectedSnapshot(data, mySeat.value)
-    gameState.value = snapshot.gameState
-    players.value = snapshot.players
-    gameLogs.value = snapshot.logs
-    godModeEnabled.value = snapshot.godModeEnabled
-    pendingAction.value = snapshot.pendingAction
-  }
-  
-  scrollToBottom()
+  applyConnectedEvent(data, {
+    wsConnected,
+    mySeat,
+    myRole,
+    gameState,
+    players,
+    gameLogs,
+    godModeEnabled,
+    pendingAction,
+    logContainer,
+  })
 }
 
 const handleWsState = (data) => {
-  const snapshot = buildStateSnapshot(data, mySeat.value)
-  gameState.value = snapshot.gameState
-  players.value = snapshot.players
-  
-  // Update logs
-  if (data.logs) {
-    const oldLogsCount = gameLogs.value.length
-    gameLogs.value = data.logs
-    scrollToBottom()
-    
-    // Check for new speech logs to show bubble
-    if (data.logs.length > oldLogsCount) {
-      const newLogs = data.logs.slice(oldLogsCount)
-      for (const log of newLogs) {
-        if (log.type === 'speech' && log.seat) {
-          showSpeechBubble(log.seat, log.content)
-          break  // Only show one bubble at a time
-        }
-      }
-    }
-    
-    // Parse votes if in vote phase
-    if (data.phase === 'vote') {
-      parseVotesFromLogs()
-    } else {
-      // Clear votes when not in vote phase
-      currentVotes.value = {}
-      voteCounts.value = {}
-    }
-  }
-  
-  // 如果上帝模式激活，刷新上帝模式数据
-  if (godModeActive.value) {
-    loadGodModeData()
-  }
-  
-  // Check if action is pending for me
-  if (snapshot.pendingAction) {
-    pendingAction.value = snapshot.pendingAction
-    selectedAllowedVoters.value = []
-    timer.value = snapshot.timer
-  } else {
-    pendingAction.value = null
-    selectedAllowedVoters.value = []
-  }
+  applyStateEvent(data, {
+    mySeat,
+    gameState,
+    players,
+    gameLogs,
+    pendingAction,
+    selectedAllowedVoters,
+    timer,
+    currentVotes,
+    voteCounts,
+    godModeActive,
+    loadGodModeData,
+    speechBubble,
+    latestSpeaker,
+    logContainer,
+  })
 }
 
 const handleWsActionRequired = (data) => {
-  const snapshot = buildActionRequiredSnapshot(data, mySeat.value)
-  if (!snapshot) return
-  pendingAction.value = snapshot.pendingAction
-  selectedAllowedVoters.value = []
-  timer.value = snapshot.timer
+  applyActionRequiredEvent(data, mySeat, pendingAction, selectedAllowedVoters, timer)
 }
 
 const handleWsRole = (data) => {
