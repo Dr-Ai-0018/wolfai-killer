@@ -301,9 +301,18 @@ import {
   formatTokenExpiry,
   mergeSelectedModels,
   normalizeAdminConfig,
-  resolveApiRequestConfig,
   showTimedToast,
 } from '@/adminPanel'
+import {
+  fetchAdminConfig,
+  getErrorMessage,
+  isUnauthorizedError,
+  loginAdmin,
+  requestRemoteModels,
+  updateAdminApiConfig,
+  updateAdminModels,
+  verifyAdminSession,
+} from '@/adminRequests'
 
 // Auth State
 const isAuthenticated = ref(false)
@@ -347,22 +356,25 @@ const showToast = (message, type = 'info') => showTimedToast(toast, message, typ
 
 const formatExpiry = (dateStr) => formatTokenExpiry(dateStr)
 
+const handleUnauthorized = () => {
+  handleLogout()
+  showToast('登录已过期，请重新登录', 'error')
+}
+
 const checkAdminStatus = async () => {
   try {
     const res = await adminApi.checkStatus()
     adminConfigured.value = res.data.configured
     
-    // Check if already logged in (token exists and valid)
-    if (adminApi.isTokenValid()) {
-      try {
-        await adminApi.verify()
+    try {
+      const session = await verifyAdminSession(adminApi)
+      if (session.authenticated) {
         isAuthenticated.value = true
-        tokenExpiry.value = localStorage.getItem('werewolf_admin_token_expiry')
+        tokenExpiry.value = session.tokenExpiry
         await loadConfig()
-      } catch {
-        // Token invalid, clear it
-        adminApi.clearToken()
       }
+    } catch {
+      adminApi.clearToken()
     }
   } catch (error) {
     console.error('检查管理状态失败：', error)
@@ -376,16 +388,16 @@ const handleLogin = async () => {
   loginError.value = ''
   
   try {
-    const res = await adminApi.login(loginPassword.value)
-    if (res.data.success) {
+    const result = await loginAdmin(adminApi, loginPassword.value)
+    if (result.success) {
       isAuthenticated.value = true
-      tokenExpiry.value = res.data.expires_at
+      tokenExpiry.value = result.tokenExpiry
       loginPassword.value = ''
       await loadConfig()
       showToast('登录成功', 'success')
     }
   } catch (error) {
-    loginError.value = error.response?.data?.detail || '登录失败'
+    loginError.value = getErrorMessage(error, '登录失败')
   } finally {
     loginLoading.value = false
   }
@@ -401,14 +413,12 @@ const handleLogout = async () => {
 
 const loadConfig = async () => {
   try {
-    const res = await adminApi.getConfig()
-    currentConfig.value = normalizeAdminConfig(res.data)
-    config.apiUrl = res.data.api_url || ''
+    const snapshot = await fetchAdminConfig(adminApi)
+    currentConfig.value = snapshot.currentConfig
+    config.apiUrl = snapshot.apiUrl
   } catch (error) {
-    if (error.response?.status === 401) {
-      // Token expired
-      handleLogout()
-      showToast('登录已过期，请重新登录', 'error')
+    if (isUnauthorizedError(error)) {
+      handleUnauthorized()
     } else {
       showToast('加载配置失败', 'error')
     }
@@ -418,20 +428,15 @@ const loadConfig = async () => {
 const saveApiConfig = async () => {
   saving.value = true
   try {
-    const updates = {}
-    if (config.apiUrl) updates.api_url = config.apiUrl
-    if (config.apiKey) updates.api_key = config.apiKey
-    
-    await adminApi.updateConfig(updates)
+    await updateAdminApiConfig(adminApi, config)
     await loadConfig()
     config.apiKey = ''
     showToast('接口配置已保存', 'success')
   } catch (error) {
-    if (error.response?.status === 401) {
-      handleLogout()
-      showToast('登录已过期，请重新登录', 'error')
+    if (isUnauthorizedError(error)) {
+      handleUnauthorized()
     } else {
-      showToast('保存失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showToast(`保存失败: ${getErrorMessage(error)}`, 'error')
     }
   } finally {
     saving.value = false
@@ -441,25 +446,22 @@ const saveApiConfig = async () => {
 const testConnection = async () => {
   testing.value = true
   try {
-    const { apiUrl, apiKey } = resolveApiRequestConfig(config, currentConfig.value)
-    
-    if (!apiUrl) {
-      showToast('请先配置API地址', 'error')
+    const result = await requestRemoteModels(adminApi, config, currentConfig.value)
+    if (result.missingApiUrl) {
+      showToast(result.message, 'error')
       return
     }
-    
-    const res = await adminApi.fetchModels(apiUrl, apiKey)
-    if (res.data.success) {
-      showToast(`连接成功！获取到 ${res.data.total} 个模型编号`, 'success')
+
+    if (result.success) {
+      showToast(`连接成功！获取到 ${result.total} 个模型编号`, 'success')
     } else {
-      showToast('连接失败: ' + res.data.message, 'error')
+      showToast(`连接失败: ${result.message}`, 'error')
     }
   } catch (error) {
-    if (error.response?.status === 401) {
-      handleLogout()
-      showToast('登录已过期，请重新登录', 'error')
+    if (isUnauthorizedError(error)) {
+      handleUnauthorized()
     } else {
-      showToast('连接失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showToast(`连接失败: ${getErrorMessage(error)}`, 'error')
     }
   } finally {
     testing.value = false
@@ -469,28 +471,24 @@ const testConnection = async () => {
 const fetchRemoteModels = async () => {
   fetching.value = true
   try {
-    const { apiUrl, apiKey } = resolveApiRequestConfig(config, currentConfig.value)
-    
-    if (!apiUrl) {
-      showToast('请先配置API地址', 'error')
-      fetching.value = false
+    const result = await requestRemoteModels(adminApi, config, currentConfig.value)
+    if (result.missingApiUrl) {
+      showToast(result.message, 'error')
       return
     }
-    
-    const res = await adminApi.fetchModels(apiUrl, apiKey)
-    if (res.data.success) {
-      fetchedModels.value = res.data.model_ids || res.data.models || []
+
+    if (result.success) {
+      fetchedModels.value = result.models
       selectedFetchedModels.value = []
-      showToast(`获取到 ${res.data.total} 个模型编号`, 'success')
+      showToast(`获取到 ${result.total} 个模型编号`, 'success')
     } else {
-      showToast('获取失败: ' + res.data.message, 'error')
+      showToast(`获取失败: ${result.message}`, 'error')
     }
   } catch (error) {
-    if (error.response?.status === 401) {
-      handleLogout()
-      showToast('登录已过期，请重新登录', 'error')
+    if (isUnauthorizedError(error)) {
+      handleUnauthorized()
     } else {
-      showToast('获取失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showToast(`获取失败: ${getErrorMessage(error)}`, 'error')
     }
   } finally {
     fetching.value = false
@@ -534,12 +532,11 @@ const removeModel = (index) => {
 const saveModels = async () => {
   saving.value = true
   try {
-    await adminApi.updateConfig({ model_ids: currentConfig.value.model_ids })
+    await updateAdminModels(adminApi, currentConfig.value.model_ids)
     showToast('模型编号配置已保存', 'success')
   } catch (error) {
-    if (error.response?.status === 401) {
-      handleLogout()
-      showToast('登录已过期，请重新登录', 'error')
+    if (isUnauthorizedError(error)) {
+      handleUnauthorized()
     } else {
       showToast('保存失败', 'error')
     }
