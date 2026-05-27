@@ -39,6 +39,17 @@ from game_day_ai import (
     choose_vote_fallback,
     parse_ai_vote_response,
 )
+from game_night_ai import (
+    build_guard_messages,
+    build_seer_messages,
+    build_witch_heal_messages,
+    build_witch_poison_messages,
+    build_wolf_messages,
+    parse_night_target_response,
+    parse_witch_poison_response,
+    should_use_heal_response,
+    should_witch_heal_fallback,
+)
 from game_vote import (
     apply_vote_rights,
     build_cast_vote_log,
@@ -762,255 +773,54 @@ class GameEngine:
         """AI守卫决策"""
         if not candidates:
             return None
-        
-        context_lines = [
-            f"当前是第{self.night_count}夜",
-            f"你是{guard.seat}号守卫",
-            f"存活玩家：{', '.join(str(s) for s in sorted(self.get_alive_seats()))}",
-            f"可守护目标：{', '.join(str(c) for c in candidates)}",
-            "",
-            "昨天的发言和投票情况：",
-        ]
-        
-        for log in self.logs[-30:]:
-            if log["is_public"] and log["type"] in ["speech", "vote", "eliminate"]:
-                if log["type"] == "speech":
-                    context_lines.append(f"{log['seat']}号发言：{log['content']}")
-                else:
-                    context_lines.append(log['content'])
-        
-        messages = [
-            {"role": "system", "content": f"""你是狼人杀游戏中的守卫，座位号{guard.seat}。
-你的性格是：{guard.personality.name} - {guard.personality.description}
-
-现在是夜晚，你需要选择一个玩家守护。被守护的玩家今晚不会被狼人杀死。
-分析场上局势，选择你认为最可能被狼人袭击的重要玩家守护。
-
-请直接回复一个数字，表示你要守护的座位号。只回复数字。"""},
-            {"role": "user", "content": "\n".join(context_lines)}
-        ]
-        
+        messages = build_guard_messages(guard, self.night_count, self.get_alive_seats(), candidates, self.logs)
         response = await self.call_llm(guard, messages, cache_namespace="night-guard")
-        if response:
-            try:
-                import re
-                numbers = re.findall(r'\d+', response)
-                if numbers:
-                    target = int(numbers[0])
-                    if target in candidates:
-                        return target
-            except:
-                pass
-        
-        return random.choice(candidates)
+        target = parse_night_target_response(response, candidates)
+        return target if target is not None else random.choice(candidates)
 
     async def generate_ai_wolf_action(self, wolves: List[Player], candidates: List[int]) -> Optional[int]:
         """AI狼人决策 - 由第一个存活的狼人代表决策"""
         if not candidates or not wolves:
             return None
-        
         leader = wolves[0]
-        wolf_seats = [w.seat for w in wolves]
-        
-        context_lines = [
-            f"当前是第{self.night_count}夜",
-            f"你是{leader.seat}号狼人",
-            f"你的狼队友：{', '.join(str(s) for s in wolf_seats if s != leader.seat) or '无'}",
-            f"存活的好人：{', '.join(str(c) for c in candidates)}",
-            "",
-            "昨天的发言和投票情况：",
-        ]
-        
-        for log in self.logs[-30:]:
-            if log["is_public"] and log["type"] in ["speech", "vote", "eliminate"]:
-                if log["type"] == "speech":
-                    context_lines.append(f"{log['seat']}号发言：{log['content']}")
-                else:
-                    context_lines.append(log['content'])
-        
-        messages = [
-            {"role": "system", "content": f"""你是狼人杀游戏中的狼人，座位号{leader.seat}。
-你的性格是：{leader.personality.name} - {leader.personality.description}
-
-现在是夜晚，狼人需要选择一个好人击杀。
-分析场上局势，优先击杀对狼人威胁最大的玩家（如预言家、女巫等神职）。
-
-请直接回复一个数字，表示你们要击杀的座位号。只回复数字。"""},
-            {"role": "user", "content": "\n".join(context_lines)}
-        ]
-        
+        messages = build_wolf_messages(leader, wolves, self.night_count, candidates, self.logs)
         response = await self.call_llm(leader, messages, cache_namespace="night-wolf")
-        if response:
-            try:
-                import re
-                numbers = re.findall(r'\d+', response)
-                if numbers:
-                    target = int(numbers[0])
-                    if target in candidates:
-                        return target
-            except:
-                pass
-        
-        return random.choice(candidates)
+        target = parse_night_target_response(response, candidates)
+        return target if target is not None else random.choice(candidates)
 
     async def generate_ai_seer_action(self, seer: Player, candidates: List[int]) -> Optional[int]:
         """AI预言家决策"""
         if not candidates:
             return None
-        
-        context_lines = [
-            f"当前是第{self.night_count}夜",
-            f"你是{seer.seat}号预言家",
-            f"已查验结果：{seer.seer_results if seer.seer_results else '无'}",
-            f"可查验目标：{', '.join(str(c) for c in candidates)}",
-            "",
-            "昨天的发言和投票情况：",
-        ]
-        
-        for log in self.logs[-30:]:
-            if log["is_public"] and log["type"] in ["speech", "vote", "eliminate"]:
-                if log["type"] == "speech":
-                    context_lines.append(f"{log['seat']}号发言：{log['content']}")
-                else:
-                    context_lines.append(log['content'])
-        
-        messages = [
-            {"role": "system", "content": f"""你是狼人杀游戏中的预言家，座位号{seer.seat}。
-你的性格是：{seer.personality.name} - {seer.personality.description}
-
-现在是夜晚，你需要选择一个玩家查验其身份（狼人或好人）。
-分析场上局势，选择你最怀疑或最需要确认身份的玩家。
-
-请直接回复一个数字，表示你要查验的座位号。只回复数字。"""},
-            {"role": "user", "content": "\n".join(context_lines)}
-        ]
-        
+        messages = build_seer_messages(seer, self.night_count, candidates, self.logs)
         response = await self.call_llm(seer, messages, cache_namespace="night-seer")
-        if response:
-            try:
-                import re
-                numbers = re.findall(r'\d+', response)
-                if numbers:
-                    target = int(numbers[0])
-                    if target in candidates:
-                        return target
-            except:
-                pass
-        
-        return random.choice(candidates)
+        target = parse_night_target_response(response, candidates)
+        return target if target is not None else random.choice(candidates)
 
     async def generate_ai_witch_heal(self, witch: Player, victim: int) -> bool:
         """AI女巫决策 - 是否救人"""
         claim_summary = self.build_public_claim_summary()
         sole_seer_claim = claim_summary.get(Role.SEER.value, [])
         small_lobby_single_wolf = len(self.players) == 5 and len([p for p in self.players.values() if p.camp == Camp.WOLF]) == 1
-
-        context_lines = [
-            f"当前是第{self.night_count}夜",
-            f"你是{witch.seat}号女巫",
-            f"今晚{victim}号被狼人袭击",
-            f"你还有解药：{'是' if witch.has_heal else '否'}",
-            f"你还有毒药：{'是' if witch.has_poison else '否'}",
-            f"当前公开预言家声明：{sole_seer_claim if sole_seer_claim else '无'}",
-            "",
-            "昨天的发言和投票情况：",
-        ]
-        
-        for log in self.logs[-30:]:
-            if log["is_public"] and log["type"] in ["speech", "vote", "eliminate"]:
-                if log["type"] == "speech":
-                    context_lines.append(f"{log['seat']}号发言：{log['content']}")
-                else:
-                    context_lines.append(log['content'])
-        
-        messages = [
-            {"role": "system", "content": f"""你是狼人杀游戏中的女巫，座位号{witch.seat}。
-你的性格是：{witch.personality.name} - {witch.personality.description}
-
-今晚{victim}号被狼人袭击。你需要决定是否使用解药救人。
-解药只有一瓶，用完就没有了。
-
-考虑因素：
-- 被刀的人是否是重要角色（如预言家）
-- 是否是第一晚
-- 场上局势如何
-- 如果是5人单狼小局，不要机械地“第一晚必救”。
-- 在5人单狼小局里，更适合救的情况是：
-  1. 刀口落在你自己
-  2. 刀口落在场上唯一可信的预言家
-  3. 刀口落在你强认的关键好人，且不救会让狼直接滚起节奏
-- 如果只是普通民牌且信息还没明朗，保留解药往往比首夜直接交掉更稳。
-
-请回复"是"或"否"，表示是否使用解药。只回复一个字。"""},
-            {"role": "user", "content": "\n".join(context_lines)}
-        ]
-        
+        messages = build_witch_heal_messages(witch, self.night_count, victim, sole_seer_claim, self.logs)
         response = await self.call_llm(witch, messages, cache_namespace="night-witch-heal")
         if response:
-            return "是" in response or "救" in response or "yes" in response.lower()
-        
-        if small_lobby_single_wolf:
-            if victim == witch.seat:
-                return True
-            if sole_seer_claim and victim in sole_seer_claim:
-                return True
-            return False
-
-        # 默认第一晚救人
-        return self.night_count == 1
+            return should_use_heal_response(response)
+        return should_witch_heal_fallback(
+            self.night_count,
+            victim,
+            witch.seat,
+            sole_seer_claim,
+            small_lobby_single_wolf,
+        )
 
     async def generate_ai_witch_poison(self, witch: Player, candidates: List[int]) -> Optional[int]:
         """AI女巫决策 - 是否毒人"""
         if not candidates:
             return None
-        
-        context_lines = [
-            f"当前是第{self.night_count}夜",
-            f"你是{witch.seat}号女巫",
-            f"可毒杀目标：{', '.join(str(c) for c in candidates)}",
-            "",
-            "昨天的发言和投票情况：",
-        ]
-        
-        for log in self.logs[-30:]:
-            if log["is_public"] and log["type"] in ["speech", "vote", "eliminate"]:
-                if log["type"] == "speech":
-                    context_lines.append(f"{log['seat']}号发言：{log['content']}")
-                else:
-                    context_lines.append(log['content'])
-        
-        messages = [
-            {"role": "system", "content": f"""你是狼人杀游戏中的女巫，座位号{witch.seat}。
-你的性格是：{witch.personality.name} - {witch.personality.description}
-
-你可以选择使用毒药毒死一个玩家，或者不使用。
-毒药只有一瓶，用完就没有了。
-
-考虑因素：
-- 是否有明确的狼人目标
-- 毒错好人的风险
-- 通常建议在有把握时再用毒
-
-如果要使用毒药，请回复要毒的座位号数字。
-如果不使用毒药，请回复"不用"或"跳过"。"""},
-            {"role": "user", "content": "\n".join(context_lines)}
-        ]
-        
+        messages = build_witch_poison_messages(witch, self.night_count, candidates, self.logs)
         response = await self.call_llm(witch, messages, cache_namespace="night-witch-poison")
-        if response:
-            if "不" in response or "跳" in response or "no" in response.lower():
-                return None
-            try:
-                import re
-                numbers = re.findall(r'\d+', response)
-                if numbers:
-                    target = int(numbers[0])
-                    if target in candidates:
-                        return target
-            except:
-                pass
-        
-        return None  # 默认不毒人
+        return parse_witch_poison_response(response, candidates)
 
     # ========== Night Phase ==========
 
