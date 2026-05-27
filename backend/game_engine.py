@@ -36,6 +36,7 @@ from game_resolution import (
     should_disable_powers_for_elder,
     awaken_wild_children,
 )
+from game_phantom import pick_random_candidate, run_phantom_role_action
 from game_special_roles import (
     apply_cupid_pair,
     apply_wild_child_idol,
@@ -1257,15 +1258,9 @@ class GameEngine:
     async def guard_action_with_phantom(self):
         """守卫行动 - 包含死亡角色的虚拟行动用于时间混淆"""
         guard = self.get_player_by_role_any(Role.GUARD)
-        if not guard:
-            # 没有守卫角色，但仍需模拟等待时间
-            await asyncio.sleep(random.uniform(3.0, 6.0))
-            return
-        
-        candidates = [s for s in self.get_alive_seats() if s != guard.guard_last_target]
-        
-        if guard.alive:
-            # 存活守卫 - 真实行动
+
+        async def run_live_action():
+            candidates = [s for s in self.get_alive_seats() if s != guard.guard_last_target]
             if guard.is_human:
                 response = await self.wait_for_human(guard.seat, "guard", {
                     "candidates": candidates,
@@ -1285,16 +1280,15 @@ class GameEngine:
                     is_public=False,
                     meta={"actor_role": "守卫", "target": target, "action": "guard"},
                 )
-        else:
-            # 死亡守卫 - 虚拟行动（不计入游戏，仅用于时间混淆和冥界复盘）
-            if not guard.is_human:
-                phantom_target = await self.generate_ai_guard_action(guard, candidates)
-                self.add_phantom_action("守卫", guard.seat, "guard", phantom_target, 
-                                       f"守护{phantom_target}号" if phantom_target else "跳过",
-                                       self.night_count)
-            else:
-                # 死亡的人类玩家也模拟等待
-                await asyncio.sleep(random.uniform(3.0, 6.0))
+
+        async def run_dead_ai_phantom():
+            candidates = [s for s in self.get_alive_seats() if s != guard.guard_last_target]
+            phantom_target = await self.generate_ai_guard_action(guard, candidates)
+            self.add_phantom_action("守卫", guard.seat, "guard", phantom_target,
+                                   f"守护{phantom_target}号" if phantom_target else "跳过",
+                                   self.night_count)
+
+        await run_phantom_role_action(guard, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
 
     async def wolf_action(self):
         """Wolves choose kill target"""
@@ -1340,13 +1334,11 @@ class GameEngine:
     async def fox_action_with_phantom(self):
         """狐狸行动 - 私有邻座嗅探，若没嗅到狼人则永久失去能力"""
         fox = self.get_player_by_role_any(Role.FOX)
-        if not fox:
-            await asyncio.sleep(random.uniform(3.0, 6.0))
-            return
 
-        candidates = self.get_alive_seats()
-
-        if fox.alive and fox.fox_power_active:
+        async def run_live_action():
+            if not fox.fox_power_active:
+                return
+            candidates = self.get_alive_seats()
             if fox.is_human:
                 response = await self.wait_for_human(fox.seat, "fox", {
                     "candidates": candidates,
@@ -1385,25 +1377,23 @@ class GameEngine:
                         is_public=False,
                         meta={"actor_role": "狐狸", "target": target, "checked": checked, "action": "lose_power"},
                     )
-        else:
-            if not fox.is_human and fox.fox_power_active:
-                phantom_target = random.choice(candidates) if candidates else None
-                if phantom_target:
-                    self.add_phantom_action("狐狸", fox.seat, "fox", phantom_target, f"嗅探{phantom_target}号周边", self.night_count)
-            else:
-                await asyncio.sleep(random.uniform(3.0, 6.0))
+
+        async def run_dead_ai_phantom():
+            if not fox.fox_power_active:
+                return
+            candidates = self.get_alive_seats()
+            phantom_target = pick_random_candidate(candidates)
+            if phantom_target:
+                self.add_phantom_action("狐狸", fox.seat, "fox", phantom_target, f"嗅探{phantom_target}号周边", self.night_count)
+
+        await run_phantom_role_action(fox, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
 
     async def seer_action_with_phantom(self):
         """预言家行动 - 包含死亡角色的虚拟行动"""
         seer = self.get_player_by_role_any(Role.SEER)
-        if not seer:
-            await asyncio.sleep(random.uniform(3.0, 6.0))
-            return
-        
-        candidates = [s for s in self.get_alive_seats() if s != seer.seat and s not in seer.seer_results]
-        
-        if seer.alive:
-            # 存活预言家 - 真实行动
+
+        async def run_live_action():
+            candidates = [s for s in self.get_alive_seats() if s != seer.seat and s not in seer.seer_results]
             if seer.is_human:
                 response = await self.wait_for_human(seer.seat, "seer", {
                     "candidates": candidates,
@@ -1425,17 +1415,17 @@ class GameEngine:
                     meta={"actor_role": "预言家", "target": target, "result": result, "action": "check"},
                 )
                 await self.emit("seer_result", {"target": target, "result": result}, to_seat=seer.seat)
-        else:
-            # 死亡预言家 - 虚拟行动（冥界复盘用）
-            if not seer.is_human:
-                phantom_target = await self.generate_ai_seer_action(seer, candidates)
-                if phantom_target and phantom_target in candidates:
-                    phantom_result = "狼人" if self.players[phantom_target].camp == Camp.WOLF else "好人"
-                    self.add_phantom_action("预言家", seer.seat, "seer", phantom_target,
-                                           f"查验{phantom_target}号，结果是【{phantom_result}】",
-                                           self.night_count)
-            else:
-                await asyncio.sleep(random.uniform(3.0, 6.0))
+
+        async def run_dead_ai_phantom():
+            candidates = [s for s in self.get_alive_seats() if s != seer.seat and s not in seer.seer_results]
+            phantom_target = await self.generate_ai_seer_action(seer, candidates)
+            if phantom_target and phantom_target in candidates:
+                phantom_result = "狼人" if self.players[phantom_target].camp == Camp.WOLF else "好人"
+                self.add_phantom_action("预言家", seer.seat, "seer", phantom_target,
+                                       f"查验{phantom_target}号，结果是【{phantom_result}】",
+                                       self.night_count)
+
+        await run_phantom_role_action(seer, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
 
     async def witch_action_with_phantom(self):
         """女巫行动 - 包含死亡角色的虚拟行动"""
