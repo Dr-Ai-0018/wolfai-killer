@@ -13,6 +13,7 @@ from typing import List, Dict, Optional, Any, Set, Callable
 from datetime import datetime
 import httpx
 
+from game_human import submit_human_action_response, wait_for_human_action
 from game_catalog import (
     Camp,
     DEFAULT_MODEL_POOL,
@@ -511,43 +512,11 @@ class GameEngine:
 
     async def wait_for_human(self, seat: int, action_type: str, options: Dict[str, Any], timeout: int = 120) -> Any:
         """Wait for human player action"""
-        self.waiting_for_human = seat
-        self.human_action_type = action_type
-        self.human_action_options = options
-        self.human_response = None
-        self.human_response_event.clear()
-        
-        await self.emit_state()
-        
-        # Also send private action request to the specific player
-        await self.emit("action_required", {
-            "seat": seat,
-            "action_type": action_type,
-            "options": options,
-            "timeout": timeout,
-        }, to_seat=seat)
-        
-        try:
-            await asyncio.wait_for(self.human_response_event.wait(), timeout=timeout)
-            response = self.human_response
-        except asyncio.TimeoutError:
-            response = None
-            self.add_log("system", f"{seat}号玩家超时，自动跳过", seat=seat)
-        
-        self.waiting_for_human = None
-        self.human_action_type = None
-        self.human_action_options = {}
-        await self.emit_state()
-        
-        return response
+        return await wait_for_human_action(self, seat, action_type, options, timeout=timeout)
 
     def submit_human_action(self, seat: int, action_data: Any) -> bool:
         """Submit human player action"""
-        if self.waiting_for_human != seat:
-            return False
-        self.human_response = action_data
-        self.human_response_event.set()
-        return True
+        return submit_human_action_response(self, seat, action_data)
 
     def build_prompt_cache_key(self, player: Player, cache_namespace: str) -> str:
         """Keep a stable cache key per game, seat, model, and interaction type."""
