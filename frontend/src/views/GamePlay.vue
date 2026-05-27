@@ -562,7 +562,8 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { gameApi, GameWebSocket, getAvatarUrl } from '@/api'
-import { buildDaySummary, buildPendingAction, buildPlayStateSnapshot, parseVoteSnapshot } from '@/gamePlay'
+import { buildDaySummary, parseVoteSnapshot } from '@/gamePlay'
+import { applyRoleResult, buildActionRequiredSnapshot, buildConnectedSnapshot, buildStateSnapshot, fetchInitialPlayerContext } from '@/gameRealtime'
 import { explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
 import { buildGodModeDisplayState, fetchAfterlifeActions, fetchGodModeBundle } from '@/gameSpectator'
 
@@ -965,25 +966,21 @@ const handleWsConnected = (data) => {
   myRole.value = data.role
   
   if (data.game_state) {
-    gameState.value = buildPlayStateSnapshot(data.game_state, { paused: false, winner: null })
-    players.value = data.game_state.players
-    gameLogs.value = data.game_state.logs || []
-    
-    // 检查上帝模式是否启用
-    godModeEnabled.value = data.game_state.god_mode_enabled || false
-    
-    // Check if action is pending for me
-    pendingAction.value = data.game_state.waiting_for_human === mySeat.value
-      ? buildPendingAction(mySeat.value, data.game_state.human_action_type, data.game_state.human_action_options)
-      : null
+    const snapshot = buildConnectedSnapshot(data, mySeat.value)
+    gameState.value = snapshot.gameState
+    players.value = snapshot.players
+    gameLogs.value = snapshot.logs
+    godModeEnabled.value = snapshot.godModeEnabled
+    pendingAction.value = snapshot.pendingAction
   }
   
   scrollToBottom()
 }
 
 const handleWsState = (data) => {
-  gameState.value = buildPlayStateSnapshot(data)
-  players.value = data.players
+  const snapshot = buildStateSnapshot(data, mySeat.value)
+  gameState.value = snapshot.gameState
+  players.value = snapshot.players
   
   // Update logs
   if (data.logs) {
@@ -1018,10 +1015,10 @@ const handleWsState = (data) => {
   }
   
   // Check if action is pending for me
-  if (data.waiting_for_human === mySeat.value && data.human_action_type) {
-    pendingAction.value = buildPendingAction(mySeat.value, data.human_action_type, data.human_action_options)
+  if (snapshot.pendingAction) {
+    pendingAction.value = snapshot.pendingAction
     selectedAllowedVoters.value = []
-    timer.value = data.human_action_options?.timeout || 120
+    timer.value = snapshot.timer
   } else {
     pendingAction.value = null
     selectedAllowedVoters.value = []
@@ -1029,11 +1026,11 @@ const handleWsState = (data) => {
 }
 
 const handleWsActionRequired = (data) => {
-  if (data.seat === mySeat.value) {
-    pendingAction.value = buildPendingAction(data.seat, data.action_type, data.options)
-    selectedAllowedVoters.value = []
-    timer.value = data.timeout || 120
-  }
+  const snapshot = buildActionRequiredSnapshot(data, mySeat.value)
+  if (!snapshot) return
+  pendingAction.value = snapshot.pendingAction
+  selectedAllowedVoters.value = []
+  timer.value = snapshot.timer
 }
 
 const handleWsRole = (data) => {
@@ -1041,24 +1038,11 @@ const handleWsRole = (data) => {
 }
 
 const handleWsSeerResult = (data) => {
-  if (myRole.value) {
-    if (!myRole.value.seer_results) {
-      myRole.value.seer_results = {}
-    }
-    myRole.value.seer_results[data.target] = data.result
-  }
+  myRole.value = applyRoleResult(myRole.value, data, 'seer')
 }
 
 const handleWsFoxResult = (data) => {
-  if (myRole.value) {
-    if (!myRole.value.fox_checks) {
-      myRole.value.fox_checks = {}
-    }
-    myRole.value.fox_checks[data.target] = data.result
-    if (data.result === '没有狼人') {
-      myRole.value.fox_power_active = false
-    }
-  }
+  myRole.value = applyRoleResult(myRole.value, data, 'fox')
 }
 
 // 监听上帝模式状态变化
@@ -1081,24 +1065,15 @@ watch(godModeActive, (active) => {
 
 // Initialize
 onMounted(async () => {
-  // Find human seat from URL or API
   try {
-    const playersRes = await gameApi.getPlayers(gameId.value)
-    players.value = playersRes.data
-    
-    const humanPlayer = playersRes.data.find(p => p.is_human)
-    if (humanPlayer) {
-      mySeat.value = humanPlayer.seat
-      
-      // Get initial role
-      const viewRes = await gameApi.getPlayerView(gameId.value, humanPlayer.seat)
-      myRole.value = viewRes.data
-    }
+    const initialContext = await fetchInitialPlayerContext(gameApi, gameId.value)
+    players.value = initialContext.players
+    mySeat.value = initialContext.mySeat
+    myRole.value = initialContext.myRole
   } catch (error) {
     console.error('加载初始状态失败：', error)
   }
   
-  // Connect WebSocket
   if (mySeat.value) {
     gameWs = new GameWebSocket(gameId.value, mySeat.value, {
       onConnected: handleWsConnected,
