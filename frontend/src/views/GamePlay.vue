@@ -562,6 +562,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { gameApi, GameWebSocket, getAvatarUrl } from '@/api'
+import { buildDaySummary, buildPendingAction, buildPlayStateSnapshot, parseVoteSnapshot } from '@/gamePlay'
 import { explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
 
 const route = useRoute()
@@ -657,14 +658,7 @@ const displayLogs = computed(() => {
 })
 
 const displayDaySummary = computed(() => (
-  gameState.value.day_summary || {
-    day: gameState.value.day_count,
-    phase: gameState.value.phase,
-    claims: {},
-    vote_map: {},
-    vote_counts: {},
-    pressure_board: [],
-  }
+  buildDaySummary(gameState.value.day_summary, gameState.value.day_count, gameState.value.phase)
 ))
 
 const claimEntries = computed(() => {
@@ -754,37 +748,9 @@ const getVoteLineCoords = (voter, target) => {
 }
 
 const parseVotesFromLogs = () => {
-  const summaryVoteMap = displayDaySummary.value.vote_map || {}
-  const summaryVoteCounts = displayDaySummary.value.vote_counts || {}
-  if (Object.keys(summaryVoteMap).length > 0 || Object.keys(summaryVoteCounts).length > 0) {
-    currentVotes.value = Object.fromEntries(
-      Object.entries(summaryVoteMap).map(([voter, target]) => [Number(voter), Number(target)])
-    )
-    voteCounts.value = Object.fromEntries(
-      Object.entries(summaryVoteCounts).map(([target, count]) => [Number(target), Number(count)])
-    )
-    return
-  }
-
-  // Parse votes from current day's logs
-  const votes = {}
-  const counts = {}
-  
-  for (const log of gameLogs.value) {
-    if (log.type === 'vote' && log.day === gameState.value.day_count) {
-      // Parse "X号投给了Y号" pattern
-      const match = log.content.match(/(\d+)号投给了(\d+)号/)
-      if (match) {
-        const voter = parseInt(match[1])
-        const target = parseInt(match[2])
-        votes[voter] = target
-        counts[target] = (counts[target] || 0) + 1
-      }
-    }
-  }
-  
-  currentVotes.value = votes
-  voteCounts.value = counts
+  const snapshot = parseVoteSnapshot(gameLogs.value, gameState.value.day_count, displayDaySummary.value)
+  currentVotes.value = snapshot.votes
+  voteCounts.value = snapshot.counts
 }
 
 const showSpeechBubble = (seat, content) => {
@@ -1004,26 +970,7 @@ const handleWsConnected = (data) => {
   myRole.value = data.role
   
   if (data.game_state) {
-    gameState.value = {
-      phase: data.game_state.phase,
-      day_count: data.game_state.day_count,
-      night_count: data.game_state.night_count,
-      paused: false,
-      winner: null,
-      waiting_for_human: data.game_state.waiting_for_human,
-      human_action_type: data.game_state.human_action_type,
-      human_action_options: data.game_state.human_action_options,
-      current_action_role: data.game_state.current_action_role,
-      current_action_message: data.game_state.current_action_message,
-      day_summary: data.game_state.day_summary || {
-        day: data.game_state.day_count,
-        phase: data.game_state.phase,
-        claims: {},
-        vote_map: {},
-        vote_counts: {},
-        pressure_board: [],
-      },
-    }
+    gameState.value = buildPlayStateSnapshot(data.game_state, { paused: false, winner: null })
     players.value = data.game_state.players
     gameLogs.value = data.game_state.logs || []
     
@@ -1031,40 +978,16 @@ const handleWsConnected = (data) => {
     godModeEnabled.value = data.game_state.god_mode_enabled || false
     
     // Check if action is pending for me
-    if (data.game_state.waiting_for_human === mySeat.value) {
-      pendingAction.value = {
-        seat: mySeat.value,
-        action_type: data.game_state.human_action_type,
-        options: data.game_state.human_action_options,
-        message: data.game_state.human_action_options?.message || '请行动',
-      }
-    }
+    pendingAction.value = data.game_state.waiting_for_human === mySeat.value
+      ? buildPendingAction(mySeat.value, data.game_state.human_action_type, data.game_state.human_action_options)
+      : null
   }
   
   scrollToBottom()
 }
 
 const handleWsState = (data) => {
-  gameState.value = {
-    phase: data.phase,
-    day_count: data.day_count,
-    night_count: data.night_count,
-    paused: data.paused,
-    winner: data.winner,
-    waiting_for_human: data.waiting_for_human,
-    human_action_type: data.human_action_type,
-    human_action_options: data.human_action_options,
-    current_action_role: data.current_action_role,
-    current_action_message: data.current_action_message,
-    day_summary: data.day_summary || {
-      day: data.day_count,
-      phase: data.phase,
-      claims: {},
-      vote_map: {},
-      vote_counts: {},
-      pressure_board: [],
-    },
-  }
+  gameState.value = buildPlayStateSnapshot(data)
   players.value = data.players
   
   // Update logs
@@ -1101,12 +1024,7 @@ const handleWsState = (data) => {
   
   // Check if action is pending for me
   if (data.waiting_for_human === mySeat.value && data.human_action_type) {
-    pendingAction.value = {
-      seat: mySeat.value,
-      action_type: data.human_action_type,
-      options: data.human_action_options,
-      message: data.human_action_options?.message || '请行动',
-    }
+    pendingAction.value = buildPendingAction(mySeat.value, data.human_action_type, data.human_action_options)
     selectedAllowedVoters.value = []
     timer.value = data.human_action_options?.timeout || 120
   } else {
@@ -1117,7 +1035,7 @@ const handleWsState = (data) => {
 
 const handleWsActionRequired = (data) => {
   if (data.seat === mySeat.value) {
-    pendingAction.value = data
+    pendingAction.value = buildPendingAction(data.seat, data.action_type, data.options)
     selectedAllowedVoters.value = []
     timer.value = data.timeout || 120
   }
