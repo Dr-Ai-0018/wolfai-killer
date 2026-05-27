@@ -34,6 +34,7 @@ from game_views import (
     get_player_or_404,
     verify_god_mode_access,
 )
+from game_ws import build_connected_payload, build_missing_game_payload, handle_websocket_message
 
 # Load environment variables
 load_dotenv()
@@ -656,7 +657,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, seat: int):
     
     engine = game_manager.get_game(game_id)
     if not engine:
-        await websocket.send_json({"event": "error", "data": {"message": "未找到该对局"}})
+        await websocket.send_json(build_missing_game_payload())
         await websocket.close()
         return
     
@@ -666,42 +667,14 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, seat: int):
     # Send initial state
     player = engine.players.get(seat)
     if player:
-        await websocket.send_json({
-            "event": "connected",
-            "data": {
-                "seat": seat,
-                "role": player.to_private_dict(),
-                "game_state": {
-                    "phase": engine.phase.value,
-                    "day_count": engine.day_count,
-                    "night_count": engine.night_count,
-                    "players": [p.to_public_dict() for p in engine.players.values()],
-                    "logs": [log for log in engine.logs if log.get("is_public", True)][-50:],
-                    "waiting_for_human": engine.waiting_for_human,
-                    "human_action_type": engine.human_action_type,
-                    "human_action_options": engine.human_action_options,
-                    "god_mode_enabled": engine.god_mode_password is not None,
-                }
-            }
-        })
+        await websocket.send_json(build_connected_payload(engine, seat, player))
     
     try:
         while True:
-            # Receive messages from client
             data = await websocket.receive_json()
-            
-            if data.get("type") == "action":
-                # Human player action
-                action_data = data.get("data", {})
-                if engine.waiting_for_human == seat:
-                    engine.submit_human_action(seat, action_data)
-                    await websocket.send_json({
-                        "event": "action_received",
-                        "data": {"success": True}
-                    })
-            
-            elif data.get("type") == "ping":
-                await websocket.send_json({"event": "pong", "data": {}})
+            response = handle_websocket_message(engine, seat, data)
+            if response is not None:
+                await websocket.send_json(response)
     
     except WebSocketDisconnect:
         game_manager.remove_connection(game_id, seat)
