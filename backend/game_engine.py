@@ -21,8 +21,6 @@ from game_catalog import (
     Personality,
     Role,
     WOLF_ROLES,
-    build_roles_from_config,
-    get_role_camp,
     normalize_model_ids,
 )
 from game_review import (
@@ -31,6 +29,9 @@ from game_review import (
     build_public_claim_summary as summarize_public_claims,
     extract_speech_meta as extract_public_speech_meta,
 )
+from game_setup import assign_mason_peers, build_player_specs
+
+
 class GamePhase(Enum):
     WAITING = "waiting"
     NIGHT = "night"
@@ -417,55 +418,21 @@ class GameEngine:
             random_models: 是否随机分配模型
             seat_model_map: 手动模型分配 {座位号: 模型名}
         """
-        # Create role list
-        roles = build_roles_from_config(
+        player_specs = build_player_specs(
             total_players=total_players,
+            human_seats=human_seats,
             num_wolves=num_wolves,
+            models_pool=self.models_pool,
             role_config=role_config,
+            avatars=avatars,
+            random_models=random_models,
+            seat_model_map=seat_model_map,
         )
-        
-        random.shuffle(roles)
-        
-        # Shuffle avatars
-        if avatars:
-            random.shuffle(avatars)
-        
-        # Create players
-        for i in range(total_players):
-            seat = i + 1
-            role = roles[i]
-            camp = get_role_camp(role)
-            is_human = seat in human_seats
-            
-            avatar = avatars[i] if avatars and i < len(avatars) else "1f642.webp"
-            model_name = None
-            personality = None
-            
-            if not is_human:
-                # Model assignment: manual > random > first available
-                if seat_model_map and seat in seat_model_map:
-                    model_name = seat_model_map[seat]
-                elif random_models and self.models_pool:
-                    model_name = random.choice(self.models_pool)
-                elif self.models_pool:
-                    model_name = self.models_pool[0]
-                else:
-                    model_name = None
-                personality = random.choice(PERSONALITIES)
-            
-            self.players[seat] = Player(
-                seat=seat,
-                role=role,
-                camp=camp,
-                is_human=is_human,
-                model_name=model_name,
-                personality=personality,
-                avatar=avatar,
-            )
 
-        mason_seats = [seat for seat, player in self.players.items() if player.role == Role.MASON]
-        for seat in mason_seats:
-            self.players[seat].mason_peers = [peer for peer in mason_seats if peer != seat]
+        for spec in player_specs:
+            self.players[spec["seat"]] = Player(**spec)
+
+        assign_mason_peers(self.players)
         
         self.start_time = datetime.now()
         self.add_log("system", "游戏已创建，等待开始...")
