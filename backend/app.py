@@ -23,6 +23,7 @@ import secrets
 
 from admin_auth import create_admin_token, get_admin_password, verify_token
 from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
+from game_control import build_success_response, submit_waiting_human_action
 from game_engine import GameEngine
 from game_stats import stats_manager
 from game_views import (
@@ -430,50 +431,33 @@ async def get_game_log(game_id: str, offset: int = 0, limit: int = 100):
 @app.post("/api/game/{game_id}/start")
 async def start_game(game_id: str):
     """Start the game"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
+    engine = get_engine_or_404(game_manager, game_id)
     # Start game in background
     asyncio.create_task(engine.start())
-    
-    return {"success": True, "message": "Game started"}
+    return build_success_response("Game started")
 
 
 @app.post("/api/game/{game_id}/pause")
 async def pause_game(game_id: str):
     """Pause the game"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
+    engine = get_engine_or_404(game_manager, game_id)
     engine.pause()
-    return {"success": True, "message": "Game paused"}
+    return build_success_response("Game paused")
 
 
 @app.post("/api/game/{game_id}/resume")
 async def resume_game(game_id: str):
     """Resume the game"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
+    engine = get_engine_or_404(game_manager, game_id)
     engine.resume()
-    return {"success": True, "message": "对局已继续"}
+    return build_success_response("对局已继续")
 
 
 @app.post("/api/game/{game_id}/action")
 async def submit_action(game_id: str, request: ActionRequest):
     """Submit human player action (REST fallback)"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    if engine.waiting_for_human:
-        success = engine.submit_human_action(engine.waiting_for_human, request.data)
-        return {"success": success}
-    
-    return {"success": False, "message": "当前没有待提交的玩家操作"}
+    engine = get_engine_or_404(game_manager, game_id)
+    return submit_waiting_human_action(engine, request.data)
 
 
 class GodModeVerifyRequest(BaseModel):
