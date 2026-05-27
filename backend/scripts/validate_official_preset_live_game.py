@@ -143,7 +143,12 @@ def run_live_game(client: httpx.Client, preset_id: str, report_dir: Path) -> dic
     phantom_payload = fetch_json(client, "GET", f"/api/game/{game_id}/phantom-actions")
 
     result = batch.review_game(
-        scenario={"name": preset_id},
+        scenario={
+            "name": preset_id,
+            "total_players": int(preset["total_players"]),
+            "num_wolves": int(preset["num_wolves"]),
+            "role_config": dict(preset.get("role_config") or {}),
+        },
         game_id=game_id,
         players=game_detail["players"],
         public_logs=public_logs,
