@@ -12,12 +12,15 @@ from game_night_actions import (
     build_fox_lose_power_log,
     build_fox_phantom_summary,
     build_fox_result_payload,
+    build_guard_action_log,
+    build_guard_phantom_summary,
     build_seer_action_log,
     build_seer_phantom_summary,
     build_seer_result_payload,
     build_witch_heal_log,
     build_witch_phantom_summary,
     build_witch_poison_log,
+    build_wolf_action_log,
     parse_human_target_response,
     parse_human_witch_heal_response,
 )
@@ -42,6 +45,14 @@ class GameNightActionsTests(unittest.TestCase):
         self.assertEqual(build_fox_phantom_summary(3), "嗅探3号周边")
         self.assertEqual(lose_power_payload["meta"]["action"], "lose_power")
 
+    def test_build_guard_payloads(self):
+        action_payload = build_guard_action_log(6, 2)
+
+        self.assertEqual(action_payload["type"], "guard_action")
+        self.assertEqual(action_payload["meta"]["action"], "guard")
+        self.assertEqual(build_guard_phantom_summary(2), "守护2号")
+        self.assertEqual(build_guard_phantom_summary(None), "跳过")
+
     def test_build_seer_payloads(self):
         action_payload = build_seer_action_log(2, 5, "狼人")
 
@@ -59,6 +70,13 @@ class GameNightActionsTests(unittest.TestCase):
         self.assertEqual(build_witch_phantom_summary(2, True, 3), "救2号；毒3号")
         self.assertEqual(build_witch_phantom_summary(2, False, None), "不救2号；不使用毒药")
         self.assertEqual(build_witch_phantom_summary(None, False, None), "不使用毒药")
+
+    def test_build_wolf_payloads(self):
+        action_payload = build_wolf_action_log(4)
+
+        self.assertEqual(action_payload["type"], "wolf_action")
+        self.assertEqual(action_payload["meta"]["action"], "kill")
+        self.assertEqual(action_payload["meta"]["target"], 4)
 
 
 if __name__ == "__main__":

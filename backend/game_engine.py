@@ -55,12 +55,15 @@ from game_night_actions import (
     build_fox_lose_power_log,
     build_fox_phantom_summary,
     build_fox_result_payload,
+    build_guard_action_log,
+    build_guard_phantom_summary,
     build_seer_action_log,
     build_seer_phantom_summary,
     build_seer_result_payload,
     build_witch_heal_log,
     build_witch_phantom_summary,
     build_witch_poison_log,
+    build_wolf_action_log,
     parse_human_target_response,
     parse_human_witch_heal_response,
 )
@@ -987,27 +990,27 @@ class GameEngine:
                     "candidates": candidates,
                     "message": "请选择今晚要守护的玩家（不能连续守护同一人）",
                 })
-                target = response.get("target") if response else None
+                target = parse_human_target_response(response, candidates)
             else:
                 target = await self.generate_ai_guard_action(guard, candidates)
             
             if target and target in candidates:
                 self.night_guarded = target
                 guard.guard_last_target = target
-                self.add_log(
-                    "guard_action",
-                    f"[上帝视角] 守卫{guard.seat}号守护了{target}号",
-                    seat=guard.seat,
-                    is_public=False,
-                    meta={"actor_role": "守卫", "target": target, "action": "guard"},
-                )
+                payload = build_guard_action_log(guard.seat, target)
+                self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
 
         async def run_dead_ai_phantom():
             candidates = [s for s in self.get_alive_seats() if s != guard.guard_last_target]
             phantom_target = await self.generate_ai_guard_action(guard, candidates)
-            self.add_phantom_action("守卫", guard.seat, "guard", phantom_target,
-                                   f"守护{phantom_target}号" if phantom_target else "跳过",
-                                   self.night_count)
+            self.add_phantom_action(
+                "守卫",
+                guard.seat,
+                "guard",
+                phantom_target,
+                build_guard_phantom_summary(phantom_target),
+                self.night_count,
+            )
 
         await run_phantom_role_action(guard, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
 
@@ -1026,7 +1029,7 @@ class GameEngine:
                 "teammates": [w.seat for w in wolves if w.seat != human_wolf.seat],
                 "message": "请选择今晚要击杀的目标",
             })
-            target = response.get("target") if response else None
+            target = parse_human_target_response(response, candidates)
         else:
             # AI狼人 - 使用LLM决策
             target = await self.generate_ai_wolf_action(wolves, candidates)
@@ -1034,12 +1037,8 @@ class GameEngine:
         if target and target in candidates:
             self.night_kill_target = target
             # 狼人行动不公开，只记录在系统日志
-            self.add_log(
-                "wolf_action",
-                f"[上帝视角] 狼人选择击杀{target}号",
-                is_public=False,
-                meta={"actor_role": "狼人", "target": target, "action": "kill"},
-            )
+            payload = build_wolf_action_log(target)
+            self.add_log(payload["type"], payload["content"], is_public=False, meta=payload["meta"])
 
     def get_neighbor_triplet(self, center_seat: int) -> list[int]:
         ordered = sorted(self.players.keys())

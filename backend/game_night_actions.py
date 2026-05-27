@@ -41,6 +41,19 @@ def build_fox_result_payload(target: int, checked: List[int], result: str) -> Di
     return {"target": target, "checked": checked, "result": result}
 
 
+def build_guard_action_log(seat: int, target: int) -> Dict[str, Any]:
+    return {
+        "type": "guard_action",
+        "content": f"[上帝视角] 守卫{seat}号守护了{target}号",
+        "seat": seat,
+        "meta": {"actor_role": "守卫", "target": target, "action": "guard"},
+    }
+
+
+def build_guard_phantom_summary(target: Optional[int]) -> str:
+    return f"守护{target}号" if target else "跳过"
+
+
 def build_fox_lose_power_log(seat: int, target: int, checked: List[int]) -> Dict[str, Any]:
     return {
         "type": "fox_action",
@@ -98,3 +111,11 @@ def build_witch_phantom_summary(night_kill_target: Optional[int], heal: bool, po
     else:
         decisions.append("不使用毒药")
     return "；".join(decisions)
+
+
+def build_wolf_action_log(target: int) -> Dict[str, Any]:
+    return {
+        "type": "wolf_action",
+        "content": f"[上帝视角] 狼人选择击杀{target}号",
+        "meta": {"actor_role": "狼人", "target": target, "action": "kill"},
+    }
