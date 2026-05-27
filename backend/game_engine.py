@@ -29,6 +29,14 @@ from game_ai_context import (
     build_system_prompt as build_ai_system_prompt,
     build_vote_context,
 )
+from game_vote import (
+    apply_vote_rights,
+    build_scapegoat_tie_log,
+    build_vote_eliminate_log,
+    build_vote_result_log,
+    build_vote_tie_log,
+    resolve_vote_round,
+)
 from game_review import (
     ROLE_CLAIM_KEYWORDS,
     build_day_summary as summarize_day_state,
@@ -1696,12 +1704,13 @@ class GameEngine:
         candidates = self.get_alive_seats()
         votes: Dict[int, int] = {}  # voter -> target
         last_voter_by_target: Dict[int, int] = {}
-        active_restriction = set(self.restricted_voters_next_day or set())
+        apply_vote_rights(
+            self.players,
+            self.get_alive_seats(),
+            self.restricted_voters_next_day,
+        )
         if self.restricted_voters_next_day is not None:
             self.restricted_voters_next_day = None
-        for seat in self.get_alive_seats():
-            player = self.players[seat]
-            player.can_vote = not active_restriction or seat in active_restriction
         
         for seat in sorted(self.get_alive_seats()):
             player = self.players[seat]
@@ -1736,34 +1745,22 @@ class GameEngine:
                 await self.emit_state()
                 await asyncio.sleep(0.3)  # 短暂延迟，让前端有时间显示
         
-        # Count votes
-        vote_counts: Dict[int, int] = {}
-        for target in votes.values():
-            vote_counts[target] = vote_counts.get(target, 0) + 1
-        
-        if vote_counts:
-            max_votes = max(vote_counts.values())
-            top_targets = [t for t, c in vote_counts.items() if c == max_votes]
-            
-            if len(top_targets) == 1:
-                eliminated = top_targets[0]
+        resolution = resolve_vote_round(votes)
+
+        if resolution:
+            if not resolution.is_tie:
+                eliminated = resolution.eliminated_seat
+                assert eliminated is not None
                 eliminated_chain = await self.eliminate_player(
                     eliminated,
                     "vote",
                     context={"last_voter": last_voter_by_target.get(eliminated)},
                 )
                 if eliminated_chain:
-                    self.add_log(
-                        "eliminate",
-                        f"{eliminated}号被投票出局（{max_votes}票）",
-                        meta={"eliminated": eliminated, "votes": max_votes, "vote_counts": vote_counts, "chain": eliminated_chain},
-                    )
+                    payload = build_vote_eliminate_log(resolution, eliminated_chain)
                 else:
-                    self.add_log(
-                        "vote_result",
-                        f"{eliminated}号获得最多票（{max_votes}票），但未实际出局。",
-                        meta={"seat": eliminated, "votes": max_votes, "vote_counts": vote_counts, "eliminated": False},
-                    )
+                    payload = build_vote_result_log(resolution)
+                self.add_log(payload["type"], payload["content"], meta=payload["meta"])
             else:
                 scapegoat = self.get_player_by_role(Role.SCAPEGOAT)
                 if scapegoat:
@@ -1772,16 +1769,13 @@ class GameEngine:
                         scapegoat_seat,
                         "scapegoat",
                         allow_hunter=False,
-                        context={"tie_targets": list(top_targets)},
+                        context={"tie_targets": list(resolution.top_targets)},
                     )
                     await self.scapegoat_choose_voters(scapegoat_seat)
-                    self.add_log(
-                        "eliminate",
-                        f"平票后，{scapegoat_seat}号替罪羊替死出局。",
-                        meta={"eliminated": scapegoat_seat, "tie_targets": top_targets, "vote_counts": vote_counts, "chain": eliminated_chain},
-                    )
+                    payload = build_scapegoat_tie_log(resolution, scapegoat_seat, eliminated_chain)
                 else:
-                    self.add_log("vote", f"平票，无人出局", meta={"vote_counts": vote_counts, "tie_targets": top_targets})
+                    payload = build_vote_tie_log(resolution)
+                self.add_log(payload["type"], payload["content"], meta=payload["meta"])
         
         await self.emit_state()
 
