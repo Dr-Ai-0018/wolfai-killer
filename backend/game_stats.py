@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
+from game_storage import build_storage_paths, ensure_storage_dirs
+
 
 @dataclass
 class GameRecord:
@@ -33,18 +35,15 @@ class GameStatsManager:
     """游戏统计管理器"""
     
     def __init__(self, data_dir: str = None):
-        if data_dir is None:
-            data_dir = os.path.join(os.path.dirname(__file__), "data")
-        self.data_dir = data_dir
-        self.history_file = os.path.join(data_dir, "game_history.json")
-        self.stats_file = os.path.join(data_dir, "game_stats.json")
-        self.reports_dir = os.path.join(data_dir, "reports")
-        self.raw_games_dir = os.path.join(data_dir, "games")
+        self.paths = build_storage_paths(data_dir)
+        self.data_dir = self.paths.data_dir
+        self.history_file = self.paths.history_file
+        self.stats_file = self.paths.stats_file
+        self.reports_dir = self.paths.reports_dir
+        self.raw_games_dir = self.paths.raw_games_dir
         
         # 确保目录存在
-        os.makedirs(data_dir, exist_ok=True)
-        os.makedirs(self.reports_dir, exist_ok=True)
-        os.makedirs(self.raw_games_dir, exist_ok=True)
+        ensure_storage_dirs(self.paths)
         
         # 加载数据
         self.history: List[Dict] = self._load_history()

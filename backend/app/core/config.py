@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     # Redis (optional)
     REDIS_URL: Optional[str] = os.getenv("REDIS_URL")
     
-    # Database
-    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "data/game_stats.json")
+    # Runtime data
+    DATA_DIR: str = os.getenv("WEREWOLF_DATA_DIR", "data")
     
     # Timeouts
     DEFAULT_TIMEOUT: int = 60

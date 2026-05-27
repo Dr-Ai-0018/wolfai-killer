@@ -26,12 +26,13 @@
 AI Wolves Killer/
 ├── backend/
 │   ├── app/                # 后续拆分中的模块化代码
-│   ├── data/               # 角色配置与运行期数据
+│   ├── data/               # 静态角色配置与默认运行期数据目录
 │   ├── Emojis/             # 头像素材
 │   ├── .env.example        # 环境变量模板
 │   ├── app.py              # 当前主后端入口
 │   ├── config.yaml         # 模型池与超时配置
 │   ├── game_engine.py      # 核心游戏逻辑
+│   ├── game_storage.py     # 运行期数据存储路径定义
 │   ├── game_stats.py       # 统计与历史记录
 │   └── requirements.txt
 ├── frontend/
@@ -62,7 +63,15 @@ cp .env.example .env
 WEREWOLF_API_KEY=your_api_key
 WEREWOLF_API_BASE_URL=https://your-compatible-api-host
 WEREWOLF_ADMIN_PASSWORD=your_admin_password
+WEREWOLF_DATA_DIR=./data
 ```
+
+说明：
+
+- `backend/config.yaml` 用于静态配置，例如模型池和超时参数
+- `backend/data/roles.json`、`backend/data/personalities.json` 用于静态角色与人格目录
+- `WEREWOLF_DATA_DIR` 用于运行期数据目录，默认是 `backend/data/`
+- 运行期生成的 `game_history.json`、`game_stats.json`、`data/games/`、`data/reports/` 都属于本地数据产物，不应和源码改动混在同一次提交里
 
 ### 2. 配置模型 ID 池
 
