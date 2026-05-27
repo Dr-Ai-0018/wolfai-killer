@@ -13,6 +13,7 @@ export const configApi = {
   getRoles: () => api.get('/config/roles'),
   getPersonalities: () => api.get('/config/personalities'),
   getModels: () => api.get('/config/models'),
+  getPresets: () => api.get('/config/presets'),
 }
 
 // Game API

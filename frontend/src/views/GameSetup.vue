@@ -2,6 +2,30 @@
   <div class="min-h-screen py-8 px-4">
     <div class="max-w-4xl mx-auto">
       <h1 class="text-3xl font-bold text-white mb-8 text-center">游戏设置</h1>
+
+      <div class="glass rounded-2xl p-6 mb-6">
+        <h2 class="text-xl font-semibold text-white mb-4">📚 官方板子</h2>
+        <div class="grid gap-4 md:grid-cols-3">
+          <button
+            v-for="preset in presets"
+            :key="preset.id"
+            @click="selectPreset(preset)"
+            :class="[
+              'rounded-xl border p-4 text-left transition-all',
+              config.preset.id === preset.id
+                ? 'border-game-accent bg-game-accent/10 shadow-lg shadow-game-accent/10'
+                : 'border-game-border bg-game-dark hover:border-game-accent/60'
+            ]"
+          >
+            <div class="text-white font-semibold mb-2">{{ preset.name }}</div>
+            <div class="text-xs text-gray-400 mb-3">{{ preset.id }}</div>
+            <p class="text-sm text-gray-300 leading-relaxed">{{ preset.description }}</p>
+          </button>
+        </div>
+        <p v-if="config.preset.id" class="mt-4 text-sm text-game-accent-light">
+          当前已选择板子：{{ config.preset.name }}
+        </p>
+      </div>
       
       <!-- Player Configuration -->
       <div class="glass rounded-2xl p-6 mb-6">
@@ -250,6 +274,8 @@ import {
   withBalancedVillagers,
 } from '@/gameSetup'
 import {
+  applyPresetToSetup,
+  buildDefaultPresetState,
   buildGameCreationPayload,
   loadSetupResources,
   sanitizeHumanSeats,
@@ -261,9 +287,11 @@ const router = useRouter()
 
 const roles = ref([])
 const models = ref([])
+const presets = ref([])
 const loading = ref(false)
 
 const config = ref({
+  preset: buildDefaultPresetState(),
   totalPlayers: 12,
   humanSeats: [],
   roleConfig: {
@@ -383,6 +411,17 @@ const toggleHumanSeat = (seat) => {
   config.value.humanSeats = toggleHumanSeatSelection(config.value.humanSeats, seat)
 }
 
+const selectPreset = (preset) => {
+  config.value.preset = {
+    id: preset.id,
+    name: preset.name,
+    description: preset.description,
+  }
+  applyPresetToSetup(config.value, preset)
+  config.value.humanSeats = sanitizeHumanSeats(config.value.humanSeats, config.value.totalPlayers)
+  updateVillagerCount()
+}
+
 const applyRecommendedSetup = (totalPlayers) => {
   config.value.roleConfig = buildRecommendedRoleConfig(totalPlayers)
   updateVillagerCount()
@@ -423,6 +462,10 @@ onMounted(async () => {
     const snapshot = await loadSetupResources(configApi)
     roles.value = snapshot.roles
     models.value = snapshot.models
+    presets.value = snapshot.presets
+    if (snapshot.presets.length > 0) {
+      selectPreset(snapshot.presets[0])
+    }
   } catch (error) {
     console.error('加载配置失败：', error)
     // 保持默认数据

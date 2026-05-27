@@ -36,6 +36,31 @@ async function mockCommonApi(page) {
     })
   })
 
+  await page.route('**/api/config/presets', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'standard_6p',
+          name: '标准六人局',
+          description: '2狼 + 预言家 + 女巫 + 守卫 + 村民',
+          total_players: 6,
+          num_wolves: 2,
+          role_config: { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, VILLAGER: 1 },
+        },
+        {
+          id: 'lovers_7p',
+          name: '情侣七人局',
+          description: '加入丘比特验证情侣链',
+          total_players: 7,
+          num_wolves: 2,
+          role_config: { WOLF: 2, CUPID: 1, SEER: 1, WITCH: 1, GUARD: 1, VILLAGER: 1 },
+        },
+      ]),
+    })
+  })
+
   await page.route('**/api/stats/overview', async route => {
     await route.fulfill({
       status: 200,
@@ -194,7 +219,8 @@ test('前端关键页面可正常浏览和操作', async ({ page }) => {
   await page.getByRole('link', { name: '开始游戏' }).first().click()
   await expect(page).toHaveURL(/\/setup$/)
   await expect(page.getByRole('heading', { name: '游戏设置' })).toBeVisible()
-  await page.selectOption('select', '5')
+  await expect(page.getByRole('button', { name: /标准六人局/ })).toBeVisible()
+  await page.getByRole('button', { name: /情侣七人局/ }).click()
   await page.getByRole('button', { name: '1' }).click()
   await expect(page.getByText('已选择 1 个真人玩家座位')).toBeVisible()
 

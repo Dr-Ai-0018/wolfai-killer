@@ -1,5 +1,19 @@
 import { buildSeatModelMap, DEFAULT_MODELS, DEFAULT_ROLES } from '@/gameSetup'
 
+export function buildDefaultPresetState() {
+  return {
+    id: '',
+    name: '',
+    description: '',
+  }
+}
+
+export function applyPresetToSetup(config, preset) {
+  if (!preset) return
+  config.totalPlayers = preset.total_players
+  config.roleConfig = { ...preset.role_config }
+}
+
 export function sanitizeHumanSeats(humanSeats, totalPlayers) {
   return humanSeats.filter((seat) => seat <= totalPlayers)
 }
@@ -30,6 +44,7 @@ export function buildGameCreationPayload(config) {
     : {}
 
   return {
+    preset_id: config.preset?.id || null,
     total_players: config.totalPlayers,
     num_wolves: config.roleConfig.WOLF,
     role_config: config.roleConfig,
@@ -49,11 +64,13 @@ export async function loadSetupResources(configApi) {
   const snapshot = {
     roles: DEFAULT_ROLES,
     models: DEFAULT_MODELS,
+    presets: [],
   }
 
-  const [rolesRes, modelsRes] = await Promise.all([
+  const [rolesRes, modelsRes, presetsRes] = await Promise.all([
     configApi.getRoles(),
     configApi.getModels(),
+    configApi.getPresets(),
   ])
 
   if (rolesRes.data && Array.isArray(rolesRes.data) && rolesRes.data.length > 0) {
@@ -61,6 +78,9 @@ export async function loadSetupResources(configApi) {
   }
   if (modelsRes.data && Array.isArray(modelsRes.data) && modelsRes.data.length > 0) {
     snapshot.models = modelsRes.data
+  }
+  if (presetsRes.data && Array.isArray(presetsRes.data) && presetsRes.data.length > 0) {
+    snapshot.presets = presetsRes.data
   }
 
   return snapshot
