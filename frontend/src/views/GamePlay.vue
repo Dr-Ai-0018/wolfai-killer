@@ -564,6 +564,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { gameApi, GameWebSocket, getAvatarUrl } from '@/api'
 import { buildDaySummary, buildPendingAction, buildPlayStateSnapshot, parseVoteSnapshot } from '@/gamePlay'
 import { explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
+import { buildGodModeDisplayState, fetchAfterlifeActions, fetchGodModeBundle } from '@/gameSpectator'
 
 const route = useRoute()
 const router = useRouter()
@@ -818,10 +819,7 @@ const getRoleAnnouncementIcon = (role) => {
 
 const loadAfterlifeReview = async () => {
   try {
-    const res = await gameApi.getPhantomActions(gameId.value)
-    if (res.data.available) {
-      phantomActions.value = res.data.phantom_actions || []
-    }
+    phantomActions.value = await fetchAfterlifeActions(gameApi, gameId.value)
     showAfterlife.value = true
   } catch (error) {
     console.error('加载冥界复盘失败：', error)
@@ -911,12 +909,12 @@ const startGame = async () => {
 // 上帝模式相关方法
 const toggleGodMode = () => {
   if (godModeActive.value) {
-    // 关闭上帝模式
-    godModeActive.value = false
-    godModeLogs.value = []
-    godModePlayers.value = []
+    const nextState = buildGodModeDisplayState(false)
+    godModeActive.value = nextState.active
+    godModeLogs.value = nextState.logs
+    godModePlayers.value = nextState.players
+    showGodModeModal.value = nextState.showPasswordModal
   } else {
-    // 打开密码验证弹窗
     showGodModeModal.value = true
   }
 }
@@ -925,9 +923,9 @@ const verifyGodModePassword = async () => {
   try {
     const res = await gameApi.verifyGodMode(gameId.value, godModePassword.value)
     if (res.data.success) {
-      godModeActive.value = true
-      showGodModeModal.value = false
-      // 加载上帝模式数据
+      const nextState = buildGodModeDisplayState(true)
+      godModeActive.value = nextState.active
+      showGodModeModal.value = nextState.showPasswordModal
       await loadGodModeData()
     } else {
       alert(res.data.message || '密码错误')
@@ -940,12 +938,9 @@ const verifyGodModePassword = async () => {
 
 const loadGodModeData = async () => {
   try {
-    const [logsRes, playersRes] = await Promise.all([
-      gameApi.getGodModeLogs(gameId.value, godModePassword.value),
-      gameApi.getGodModePlayers(gameId.value, godModePassword.value)
-    ])
-    godModeLogs.value = logsRes.data.logs || []
-    godModePlayers.value = playersRes.data || []
+    const bundle = await fetchGodModeBundle(gameApi, gameId.value, godModePassword.value)
+    godModeLogs.value = bundle.logs
+    godModePlayers.value = bundle.players
     scrollToBottom()
   } catch (error) {
     console.error('加载上帝模式数据失败：', error)
