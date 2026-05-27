@@ -28,6 +28,12 @@ from admin_routes import (
     build_fetch_models_success_response,
     build_god_mode_verify_response,
 )
+from app_readonly import (
+    build_admin_config_payload,
+    build_model_catalog,
+    build_stats_overview_payload,
+    get_stats_game_detail_or_404,
+)
 from app_requests import (
     ActionRequest,
     AdminConfigUpdate,
@@ -95,11 +101,6 @@ def parse_model_timeout_overrides(raw: Optional[str]) -> Dict[str, int]:
         except ValueError:
             continue
     return overrides
-
-
-def build_model_catalog(raw_models: Any) -> List[Dict[str, str]]:
-    """Return frontend-friendly model entries from config or remote payloads."""
-    return [{"id": model_id, "label": model_id} for model_id in normalize_model_ids(raw_models)]
 
 
 # ========== Game Manager ==========
@@ -279,16 +280,13 @@ async def get_personalities():
 @app.get("/api/config/models")
 async def get_models():
     """Get available AI models"""
-    return build_model_catalog(game_manager.config.get("models", []))
+    return build_model_catalog(game_manager.config.get("models", []), normalize_model_ids)
 
 
 @app.get("/api/stats/overview")
 async def get_stats():
     """获取总览统计"""
-    overview = stats_manager.get_overview()
-    # 添加当前活跃游戏数
-    overview["active_games"] = len([g for g in game_manager.games.values() if g.phase.value not in ["ended", "waiting"]])
-    return overview
+    return build_stats_overview_payload(stats_manager.get_overview(), game_manager.games.values())
 
 
 @app.get("/api/stats/detailed")
@@ -324,10 +322,7 @@ async def get_history(page: int = 1, per_page: int = 20):
 @app.get("/api/stats/game/{game_id}")
 async def get_game_detail(game_id: str):
     """获取单局游戏详情"""
-    game = stats_manager.get_game_detail(game_id)
-    if not game:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    return game
+    return get_stats_game_detail_or_404(stats_manager, game_id)
 
 
 @app.post("/api/game/create")
@@ -500,16 +495,7 @@ async def verify_admin_token(admin: dict = Depends(get_current_admin)):
 @app.get("/api/admin/config")
 async def get_admin_config(_: dict = Depends(get_current_admin)):
     """获取当前配置（脱敏）"""
-    api_config = game_manager.config.get("api", {})
-    model_ids = normalize_model_ids(game_manager.config.get("models", []))
-    return {
-        "api_url": api_config.get("base_url", ""),
-        "api_key_masked": "***" + api_config.get("api_key", "")[-4:] if api_config.get("api_key") else "",
-        "models": model_ids,
-        "model_ids": model_ids,
-        "default_timeout": api_config.get("default_timeout", 60),
-        "model_timeout_map": api_config.get("model_timeout_map", {}),
-    }
+    return build_admin_config_payload(game_manager.config, normalize_model_ids)
 
 
 @app.post("/api/admin/config")
