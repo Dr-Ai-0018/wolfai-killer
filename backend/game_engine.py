@@ -17,6 +17,7 @@ from game_human import submit_human_action_response, wait_for_human_action
 from game_first_night import run_cupid_action, run_wild_child_action
 from game_loop import emit_initial_roles, run_game_round
 from game_night_flow import execute_night_phase
+from game_night_roles import run_fox_action, run_guard_action, run_seer_action, run_witch_action, run_wolf_action
 from game_catalog import (
     Camp,
     DEFAULT_MODEL_POOL,
@@ -756,64 +757,11 @@ class GameEngine:
 
     async def guard_action_with_phantom(self):
         """守卫行动 - 包含死亡角色的虚拟行动用于时间混淆"""
-        guard = self.get_player_by_role_any(Role.GUARD)
-
-        async def run_live_action():
-            candidates = [s for s in self.get_alive_seats() if s != guard.guard_last_target]
-            if guard.is_human:
-                response = await self.wait_for_human(guard.seat, "guard", {
-                    "candidates": candidates,
-                    "message": "请选择今晚要守护的玩家（不能连续守护同一人）",
-                })
-                target = parse_human_target_response(response, candidates)
-            else:
-                target = await self.generate_ai_guard_action(guard, candidates)
-            
-            if target and target in candidates:
-                self.night_guarded = target
-                guard.guard_last_target = target
-                payload = build_guard_action_log(guard.seat, target)
-                self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
-
-        async def run_dead_ai_phantom():
-            candidates = [s for s in self.get_alive_seats() if s != guard.guard_last_target]
-            phantom_target = await self.generate_ai_guard_action(guard, candidates)
-            self.add_phantom_action(
-                "守卫",
-                guard.seat,
-                "guard",
-                phantom_target,
-                build_guard_phantom_summary(phantom_target),
-                self.night_count,
-            )
-
-        await run_phantom_role_action(guard, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
+        await run_guard_action(self)
 
     async def wolf_action(self):
         """Wolves choose kill target"""
-        wolves = self.get_alive_wolves()
-        if not wolves:
-            return
-        
-        candidates = [s for s in self.get_alive_seats() if self.players[s].camp != Camp.WOLF]
-        human_wolf = next((w for w in wolves if w.is_human), None)
-        
-        if human_wolf:
-            response = await self.wait_for_human(human_wolf.seat, "wolf", {
-                "candidates": candidates,
-                "teammates": [w.seat for w in wolves if w.seat != human_wolf.seat],
-                "message": "请选择今晚要击杀的目标",
-            })
-            target = parse_human_target_response(response, candidates)
-        else:
-            # AI狼人 - 使用LLM决策
-            target = await self.generate_ai_wolf_action(wolves, candidates)
-        
-        if target and target in candidates:
-            self.night_kill_target = target
-            # 狼人行动不公开，只记录在系统日志
-            payload = build_wolf_action_log(target)
-            self.add_log(payload["type"], payload["content"], is_public=False, meta=payload["meta"])
+        await run_wolf_action(self)
 
     def get_neighbor_triplet(self, center_seat: int) -> list[int]:
         ordered = sorted(self.players.keys())
@@ -828,140 +776,15 @@ class GameEngine:
 
     async def fox_action_with_phantom(self):
         """狐狸行动 - 私有邻座嗅探，若没嗅到狼人则永久失去能力"""
-        fox = self.get_player_by_role_any(Role.FOX)
-
-        async def run_live_action():
-            if not fox.fox_power_active:
-                return
-            candidates = self.get_alive_seats()
-            if fox.is_human:
-                response = await self.wait_for_human(fox.seat, "fox", {
-                    "candidates": candidates,
-                    "known_results": fox.fox_checks,
-                    "message": "请选择一名玩家；你会嗅探该玩家及其左右邻座中是否存在狼人",
-                })
-                target = parse_human_target_response(response, candidates)
-            else:
-                target = random.choice(candidates) if candidates else None
-
-            if target and target in candidates:
-                checked = self.get_neighbor_triplet(target)
-                found_wolf = any(self.players[seat].camp == Camp.WOLF for seat in checked)
-                result = "有狼人" if found_wolf else "没有狼人"
-                fox.fox_checks[target] = result
-                payload = build_fox_action_log(fox.seat, target, checked, result)
-                self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
-                await self.emit("fox_result", build_fox_result_payload(target, checked, result), to_seat=fox.seat)
-                if not found_wolf:
-                    fox.fox_power_active = False
-                    payload = build_fox_lose_power_log(fox.seat, target, checked)
-                    self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
-
-        async def run_dead_ai_phantom():
-            if not fox.fox_power_active:
-                return
-            candidates = self.get_alive_seats()
-            phantom_target = pick_random_candidate(candidates)
-            if phantom_target:
-                self.add_phantom_action("狐狸", fox.seat, "fox", phantom_target, build_fox_phantom_summary(phantom_target), self.night_count)
-
-        await run_phantom_role_action(fox, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
+        await run_fox_action(self)
 
     async def seer_action_with_phantom(self):
         """预言家行动 - 包含死亡角色的虚拟行动"""
-        seer = self.get_player_by_role_any(Role.SEER)
-
-        async def run_live_action():
-            candidates = [s for s in self.get_alive_seats() if s != seer.seat and s not in seer.seer_results]
-            if seer.is_human:
-                response = await self.wait_for_human(seer.seat, "seer", {
-                    "candidates": candidates,
-                    "known_results": seer.seer_results,
-                    "message": "请选择要查验的玩家",
-                })
-                target = parse_human_target_response(response, candidates)
-            else:
-                target = await self.generate_ai_seer_action(seer, candidates)
-            
-            if target and target in candidates:
-                result = "狼人" if self.players[target].camp == Camp.WOLF else "好人"
-                seer.seer_results[target] = result
-                payload = build_seer_action_log(seer.seat, target, result)
-                self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
-                await self.emit("seer_result", build_seer_result_payload(target, result), to_seat=seer.seat)
-
-        async def run_dead_ai_phantom():
-            candidates = [s for s in self.get_alive_seats() if s != seer.seat and s not in seer.seer_results]
-            phantom_target = await self.generate_ai_seer_action(seer, candidates)
-            if phantom_target and phantom_target in candidates:
-                phantom_result = "狼人" if self.players[phantom_target].camp == Camp.WOLF else "好人"
-                self.add_phantom_action(
-                    "预言家",
-                    seer.seat,
-                    "seer",
-                    phantom_target,
-                    build_seer_phantom_summary(phantom_target, phantom_result),
-                    self.night_count,
-                )
-
-        await run_phantom_role_action(seer, (3.0, 6.0), run_live_action, run_dead_ai_phantom)
+        await run_seer_action(self)
 
     async def witch_action_with_phantom(self):
         """女巫行动 - 包含死亡角色的虚拟行动"""
-        witch = self.get_player_by_role_any(Role.WITCH)
-
-        async def run_live_action():
-            candidates = [s for s in self.get_alive_seats() if s != witch.seat]
-            if witch.has_heal and self.night_kill_target:
-                if witch.is_human:
-                    response = await self.wait_for_human(witch.seat, "witch_heal", {
-                        "victim": self.night_kill_target,
-                        "message": f"今晚{self.night_kill_target}号被刀，是否使用解药？",
-                    })
-                    use_heal = parse_human_witch_heal_response(response)
-                else:
-                    use_heal = await self.generate_ai_witch_heal(witch, self.night_kill_target)
-                
-                if use_heal:
-                    witch.has_heal = False
-                    self.night_healed = True
-                    payload = build_witch_heal_log(witch.seat, self.night_kill_target)
-                    self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
-
-            if witch.has_poison:
-                if witch.is_human:
-                    response = await self.wait_for_human(witch.seat, "witch_poison", {
-                        "candidates": candidates,
-                        "message": "是否使用毒药？选择目标或跳过",
-                    })
-                    target = parse_human_target_response(response, candidates)
-                else:
-                    target = await self.generate_ai_witch_poison(witch, candidates)
-                
-                if target and target in candidates:
-                    witch.has_poison = False
-                    self.night_poisoned = target
-                    payload = build_witch_poison_log(witch.seat, target)
-                    self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
-
-        async def run_dead_ai_phantom():
-            candidates = [s for s in self.get_alive_seats() if s != witch.seat]
-            if self.night_kill_target:
-                phantom_heal = await self.generate_ai_witch_heal(witch, self.night_kill_target)
-            else:
-                phantom_heal = False
-
-            phantom_poison = await self.generate_ai_witch_poison(witch, candidates)
-            self.add_phantom_action(
-                "女巫",
-                witch.seat,
-                "witch",
-                phantom_poison,
-                build_witch_phantom_summary(self.night_kill_target, phantom_heal, phantom_poison),
-                self.night_count,
-            )
-
-        await run_phantom_role_action(witch, (4.0, 8.0), run_live_action, run_dead_ai_phantom)
+        await run_witch_action(self)
 
     async def resolve_night(self):
         """Resolve night actions and announce deaths"""
