@@ -36,6 +36,12 @@ from game_resolution import (
     should_disable_powers_for_elder,
     awaken_wild_children,
 )
+from game_special_roles import (
+    apply_cupid_pair,
+    apply_wild_child_idol,
+    choose_cupid_pair,
+    choose_wild_child_idol,
+)
 from game_setup import assign_mason_peers, build_player_specs
 
 
@@ -1167,7 +1173,7 @@ class GameEngine:
             return
 
         candidates = self.get_alive_seats()
-        pair: list[int] = []
+        requested_pair: Optional[list[int]] = None
 
         if cupid.alive:
             if cupid.is_human:
@@ -1177,25 +1183,21 @@ class GameEngine:
                 })
                 raw_pair = response.get("pair") if response else None
                 if isinstance(raw_pair, list):
-                    pair = [int(item) for item in raw_pair if int(item) in candidates]
+                    requested_pair = [int(item) for item in raw_pair if int(item) in candidates]
             else:
-                pair = random.sample(candidates, 2) if len(candidates) >= 2 else []
+                requested_pair = choose_cupid_pair(candidates)
         else:
             if not cupid.is_human:
-                pair = random.sample(candidates, 2) if len(candidates) >= 2 else []
+                pair = choose_cupid_pair(candidates)
                 self.add_phantom_action("丘比特", cupid.seat, "cupid", None, f"连接{pair[0]}号与{pair[1]}号" if len(pair) == 2 else "跳过", self.night_count)
             else:
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             return
 
-        if len(pair) != 2 or pair[0] == pair[1]:
-            available = [seat for seat in candidates]
-            pair = random.sample(available, 2) if len(available) >= 2 else []
+        pair = choose_cupid_pair(candidates, requested_pair)
 
-        if len(pair) == 2:
+        if apply_cupid_pair(self.players, pair):
             first, second = pair
-            self.players[first].lover = second
-            self.players[second].lover = first
             self.cupid_paired = True
             self.add_log(
                 "cupid_action",
@@ -1214,7 +1216,7 @@ class GameEngine:
             return
 
         candidates = [seat for seat in self.get_alive_seats() if seat != wild_child.seat]
-        idol: Optional[int] = None
+        requested_idol: Optional[int] = None
 
         if wild_child.alive:
             if wild_child.is_human:
@@ -1229,22 +1231,20 @@ class GameEngine:
                     except (TypeError, ValueError):
                         parsed = None
                     if parsed in candidates:
-                        idol = parsed
+                        requested_idol = parsed
             else:
-                idol = random.choice(candidates) if candidates else None
+                requested_idol = choose_wild_child_idol(candidates)
         else:
             if not wild_child.is_human:
-                idol = random.choice(candidates) if candidates else None
+                idol = choose_wild_child_idol(candidates)
                 self.add_phantom_action("野孩子", wild_child.seat, "wild_child", idol, f"认{idol}号为榜样" if idol else "跳过", self.night_count)
             else:
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             return
 
-        if idol not in candidates:
-            idol = random.choice(candidates) if candidates else None
+        idol = choose_wild_child_idol(candidates, requested_idol)
 
-        if idol is not None:
-            wild_child.idol = idol
+        if apply_wild_child_idol(wild_child, idol):
             self.add_log(
                 "wild_child_action",
                 f"[上帝视角] {wild_child.seat}号野孩子认定了{idol}号为榜样",
