@@ -15,6 +15,7 @@ import httpx
 
 from game_human import submit_human_action_response, wait_for_human_action
 from game_loop import emit_initial_roles, run_game_round
+from game_night_flow import execute_night_phase
 from game_catalog import (
     Camp,
     DEFAULT_MODEL_POOL,
@@ -736,58 +737,8 @@ class GameEngine:
 
     async def run_night(self):
         """Execute night phase with role announcements and phantom actions"""
-        self.night_count += 1
         self.phase = GamePhase.NIGHT
-        self.night_kill_target = None
-        self.night_healed = False
-        self.night_poisoned = None
-        
-        self.add_log("phase", f"第{self.night_count}夜：天黑请闭眼")
-        await self.emit_state()
-        await asyncio.sleep(1.5)  # 给玩家准备时间
-
-        if self.night_count == 1:
-            await self.announce_role_action("野孩子", "野孩子请睁眼，请选择一名玩家作为你的榜样")
-            await self.wild_child_action()
-            await self.announce_role_action("野孩子", "野孩子请闭眼", 1.5)
-
-        if self.night_count == 1 and not self.cupid_paired:
-            await self.announce_role_action("丘比特", "丘比特请睁眼，请选择两名玩家成为情侣")
-            await self.cupid_action()
-            await self.announce_role_action("丘比特", "丘比特请闭眼", 1.5)
-        
-        # Guard action (with announcement and phantom)
-        if not self.powers_disabled:
-            await self.announce_role_action("守卫", "守卫请睁眼，请选择你要守护的人")
-            await self.guard_action_with_phantom()
-            await self.announce_role_action("守卫", "守卫请闭眼", 1.5)
-        
-        # Wolf action (with announcement)
-        await self.announce_role_action("狼人", "狼人请睁眼，请讨论并选择你们的猎杀目标")
-        await self.wolf_action()
-        await self.announce_role_action("狼人", "狼人请闭眼", 1.5)
-
-        if not self.powers_disabled:
-            await self.announce_role_action("狐狸", "狐狸请睁眼，请选择一名玩家进行邻座嗅探")
-            await self.fox_action_with_phantom()
-            await self.announce_role_action("狐狸", "狐狸请闭眼", 1.5)
-        
-        # Seer action (with announcement and phantom)
-        if not self.powers_disabled:
-            await self.announce_role_action("预言家", "预言家请睁眼，请选择你要查验的人")
-            await self.seer_action_with_phantom()
-            await self.announce_role_action("预言家", "预言家请闭眼", 1.5)
-        
-        # Witch action (with announcement and phantom)
-        if not self.powers_disabled:
-            await self.announce_role_action("女巫", "女巫请睁眼")
-            await self.witch_action_with_phantom()
-            await self.announce_role_action("女巫", "女巫请闭眼", 1.5)
-        
-        await self.clear_role_announcement()
-        
-        # Resolve night
-        await self.resolve_night()
+        await execute_night_phase(self)
 
     def get_player_by_role_any(self, role: Role) -> Optional[Player]:
         """获取某角色的玩家（无论死活）"""
