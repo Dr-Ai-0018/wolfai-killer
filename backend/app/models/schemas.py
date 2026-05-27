@@ -2,11 +2,13 @@
 Pydantic schemas for API request/response validation
 """
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GameCreateRequest(BaseModel):
     """Request to create a new game"""
+    model_config = ConfigDict(protected_namespaces=())
+
     player_count: int = Field(ge=6, le=12, description="Number of players")
     human_seats: List[int] = Field(default_factory=list, description="Seats for human players")
     model_name: Optional[str] = Field(None, description="Default AI model name")

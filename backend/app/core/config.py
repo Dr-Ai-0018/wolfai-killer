@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any
 from functools import lru_cache
 
 import yaml
+from pydantic_settings import SettingsConfigDict
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -16,6 +17,11 @@ load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings loaded from environment and config files"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="allow",
+    )
     
     # Base paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
@@ -39,10 +45,6 @@ class Settings(BaseSettings):
     
     # Models
     MODELS: List[str] = []
-    
-    class Config:
-        env_file = ".env"
-        extra = "allow"
     
     def load_yaml_config(self) -> Dict[str, Any]:
         """Load additional config from YAML file"""
