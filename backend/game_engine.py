@@ -29,6 +29,13 @@ from game_review import (
     build_public_claim_summary as summarize_public_claims,
     extract_speech_meta as extract_public_speech_meta,
 )
+from game_resolution import (
+    determine_winner,
+    find_lover_chain_target,
+    resolve_immediate_elimination_rule,
+    should_disable_powers_for_elder,
+    awaken_wild_children,
+)
 from game_setup import assign_mason_peers, build_player_specs
 
 
@@ -455,23 +462,7 @@ class GameEngine:
 
     def check_winner(self) -> Optional[str]:
         """Check if game has ended"""
-        if self.angel_victory_seat is not None:
-            return "天使阵营"
-
-        alive_players = [p for p in self.players.values() if p.alive]
-        if len(alive_players) == 2:
-            first, second = alive_players
-            if first.lover == second.seat and second.lover == first.seat and first.camp != second.camp:
-                return "情侣阵营"
-
-        wolves = self.get_alive_wolves()
-        goods = self.get_alive_goods()
-        
-        if not wolves:
-            return "好人阵营"
-        if len(wolves) >= len(goods):
-            return "狼人阵营"
-        return None
+        return determine_winner(self.players, self.angel_victory_seat)
 
     def disable_good_powers(self) -> None:
         if self.powers_disabled:
@@ -480,28 +471,19 @@ class GameEngine:
         self.add_log("system", "长老以非狼人袭击的方式死亡，村庄神职能力失效。")
 
     def should_disable_powers_for_elder(self, cause: str) -> bool:
-        return cause not in {"wolf_kill", "lover_suicide"}
+        return should_disable_powers_for_elder(cause)
 
     async def awaken_wild_children_for_idol(self, dead_seat: int) -> list[int]:
-        awakened: list[int] = []
-        for player in self.players.values():
-            if (
-                player.alive
-                and player.role == Role.WILD_CHILD
-                and not player.wild_child_awakened
-                and player.idol == dead_seat
-            ):
-                player.camp = Camp.WOLF
-                player.wild_child_awakened = True
-                awakened.append(player.seat)
-                self.add_log(
-                    "wild_child_awaken",
-                    f"[上帝视角] {player.seat}号野孩子因榜样死亡转入狼人阵营",
-                    seat=player.seat,
-                    is_public=False,
-                    meta={"seat": player.seat, "idol": dead_seat, "action": "awaken"},
-                )
-                await self.emit("wild_child_awakened", {"idol": dead_seat}, to_seat=player.seat)
+        awakened = awaken_wild_children(self.players, dead_seat)
+        for seat in awakened:
+            self.add_log(
+                "wild_child_awaken",
+                f"[上帝视角] {seat}号野孩子因榜样死亡转入狼人阵营",
+                seat=seat,
+                is_public=False,
+                meta={"seat": seat, "idol": dead_seat, "action": "awaken"},
+            )
+            await self.emit("wild_child_awakened", {"idol": dead_seat}, to_seat=seat)
         return awakened
 
     async def eliminate_player(
@@ -516,9 +498,8 @@ class GameEngine:
             return []
         context = context or {}
 
-        if player.role == Role.ANGEL and player.angel_active and cause in {"wolf_kill", "vote"} and self.day_count <= 1:
-            player.alive = False
-            player.angel_active = False
+        immediate_effect = resolve_immediate_elimination_rule(player, cause, self.day_count)
+        if immediate_effect and immediate_effect.kind == "angel_victory":
             self.angel_victory_seat = seat
             self.add_log(
                 "angel_victory",
@@ -527,28 +508,21 @@ class GameEngine:
                 meta={"seat": seat, "role": player.role.value, "cause": cause, "winner": "天使阵营"},
             )
             return [seat]
-
-        if cause == "wolf_kill" and player.role == Role.ELDER and player.elder_lives > 1:
-            player.elder_lives -= 1
+        if immediate_effect and immediate_effect.kind == "elder_survive":
             self.add_log(
                 "system",
                 f"{seat}号长老承受了第一次狼人袭击，侥幸存活。",
                 meta={"seat": seat, "role": player.role.value, "cause": cause, "elder_lives": player.elder_lives},
             )
             return []
-
-        if cause == "wolf_kill" and player.role == Role.BLESSED and not player.blessing_used:
-            player.blessing_used = True
+        if immediate_effect and immediate_effect.kind == "blessed_survive":
             self.add_log(
                 "system",
                 f"{seat}号受祝福者抵挡了第一次狼人袭击，侥幸存活。",
                 meta={"seat": seat, "role": player.role.value, "cause": cause, "blessing_used": True},
             )
             return []
-
-        if cause == "wolf_kill" and player.role == Role.CURSED and not player.cursed_turned:
-            player.camp = Camp.WOLF
-            player.cursed_turned = True
+        if immediate_effect and immediate_effect.kind == "cursed_turn":
             self.add_log(
                 "system",
                 f"{seat}号被狼人诅咒后未死亡，已秘密转入狼人阵营。",
@@ -558,10 +532,7 @@ class GameEngine:
             )
             await self.emit("cursed_turned", {"camp": Camp.WOLF.value}, to_seat=seat)
             return []
-
-        if cause == "vote" and player.role == Role.IDIOT and not player.idiot_revealed:
-            player.idiot_revealed = True
-            player.can_vote = False
+        if immediate_effect and immediate_effect.kind == "idiot_reveal":
             self.add_log(
                 "reveal",
                 f"{seat}号被票出时翻牌为白痴，免于出局，但此后失去投票权。",
@@ -575,19 +546,18 @@ class GameEngine:
         if player.role == Role.ELDER and self.should_disable_powers_for_elder(cause):
             self.disable_good_powers()
 
-        lover_seat = player.lover
+        lover_seat = find_lover_chain_target(self.players, seat)
         if lover_seat:
-            lover = self.players.get(lover_seat)
-            if lover and lover.alive:
-                lover.alive = False
-                eliminated.append(lover_seat)
-                self.add_log(
-                    "system",
-                    f"{lover_seat}号因情侣殉情而死亡。",
-                    meta={"seat": lover_seat, "cause": "lover_suicide", "lover_of": seat},
-                )
-                if lover.role == Role.ELDER and self.should_disable_powers_for_elder("lover_suicide"):
-                    self.disable_good_powers()
+            lover = self.players[lover_seat]
+            lover.alive = False
+            eliminated.append(lover_seat)
+            self.add_log(
+                "system",
+                f"{lover_seat}号因情侣殉情而死亡。",
+                meta={"seat": lover_seat, "cause": "lover_suicide", "lover_of": seat},
+            )
+            if lover.role == Role.ELDER and self.should_disable_powers_for_elder("lover_suicide"):
+                self.disable_good_powers()
 
         awakened_children: list[int] = []
         for eliminated_seat in list(eliminated):
