@@ -25,6 +25,14 @@ from admin_auth import create_admin_token, get_admin_password, verify_token
 from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
 from game_engine import GameEngine
 from game_stats import stats_manager
+from game_views import (
+    build_game_status_payload,
+    build_phantom_actions_payload,
+    build_public_logs_payload,
+    get_engine_or_404,
+    get_player_or_404,
+    verify_god_mode_access,
+)
 
 # Load environment variables
 load_dotenv()
@@ -393,58 +401,30 @@ async def create_game(request: CreateGameRequest):
 @app.get("/api/game/{game_id}/status")
 async def get_game_status(game_id: str):
     """Get game status"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    return {
-        "game_id": game_id,
-        "phase": engine.phase.value,
-        "day_count": engine.day_count,
-        "night_count": engine.night_count,
-        "paused": engine.paused,
-        "winner": engine.winner,
-        "alive_seats": engine.get_alive_seats(),
-        "waiting_for_human": engine.waiting_for_human,
-        "human_action_type": engine.human_action_type,
-        "human_action_options": engine.human_action_options,
-        "day_summary": engine.build_day_summary(),
-    }
+    engine = get_engine_or_404(game_manager, game_id)
+    return build_game_status_payload(engine, game_id)
 
 
 @app.get("/api/game/{game_id}/players")
 async def get_players(game_id: str):
     """Get players list"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
+    engine = get_engine_or_404(game_manager, game_id)
     return [p.to_public_dict() for p in engine.players.values()]
 
 
 @app.get("/api/game/{game_id}/player/{seat}")
 async def get_player_view(game_id: str, seat: int):
     """Get player's private view"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    player = engine.players.get(seat)
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-    
+    engine = get_engine_or_404(game_manager, game_id)
+    player = get_player_or_404(engine, seat)
     return player.to_private_dict()
 
 
 @app.get("/api/game/{game_id}/log")
 async def get_game_log(game_id: str, offset: int = 0, limit: int = 100):
     """Get game logs"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    public_logs = [log for log in engine.logs if log.get("is_public", True)]
-    return {"logs": public_logs[offset:offset+limit], "total": len(public_logs)}
+    engine = get_engine_or_404(game_manager, game_id)
+    return build_public_logs_payload(engine, offset, limit)
 
 
 @app.post("/api/game/{game_id}/start")
@@ -650,10 +630,7 @@ async def fetch_remote_models(request: FetchModelsRequest, _: dict = Depends(get
 @app.post("/api/game/{game_id}/god-mode/verify")
 async def verify_god_mode(game_id: str, request: GodModeVerifyRequest):
     """验证上帝模式密码"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
+    engine = get_engine_or_404(game_manager, game_id)
     if not engine.god_mode_password:
         return {"success": False, "message": "本局游戏未启用上帝模式"}
     
@@ -666,53 +643,24 @@ async def verify_god_mode(game_id: str, request: GodModeVerifyRequest):
 @app.get("/api/game/{game_id}/god-mode/logs")
 async def get_god_mode_logs(game_id: str, password: str, offset: int = 0, limit: int = 100):
     """获取上帝模式日志（包含所有私密信息）"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    if not engine.god_mode_password:
-        raise HTTPException(status_code=403, detail="本局游戏未启用上帝模式")
-    
-    if password != engine.god_mode_password:
-        raise HTTPException(status_code=403, detail="密码错误")
-    
-    # 返回所有日志（包括私密日志）
+    engine = get_engine_or_404(game_manager, game_id)
+    verify_god_mode_access(engine, password)
     return {"logs": engine.logs[offset:offset+limit], "total": len(engine.logs)}
 
 
 @app.get("/api/game/{game_id}/god-mode/players")
 async def get_god_mode_players(game_id: str, password: str):
     """获取所有玩家的完整信息（包括身份）"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    if not engine.god_mode_password:
-        raise HTTPException(status_code=403, detail="本局游戏未启用上帝模式")
-    
-    if password != engine.god_mode_password:
-        raise HTTPException(status_code=403, detail="密码错误")
-    
-    # 返回所有玩家的私密信息
+    engine = get_engine_or_404(game_manager, game_id)
+    verify_god_mode_access(engine, password)
     return [p.to_private_dict() for p in engine.players.values()]
 
 
 @app.get("/api/game/{game_id}/phantom-actions")
 async def get_phantom_actions(game_id: str):
     """获取冥界复盘数据 - 死亡角色的虚拟行动记录（仅游戏结束后可见）"""
-    engine = game_manager.get_game(game_id)
-    if not engine:
-        raise HTTPException(status_code=404, detail="未找到该对局")
-    
-    # 只有游戏结束后才能查看冥界复盘
-    if engine.phase.value != "ended":
-        return {"available": False, "message": "冥界复盘仅在游戏结束后可用", "phantom_actions": []}
-    
-    return {
-        "available": True,
-        "phantom_actions": engine.phantom_actions,
-        "total": len(engine.phantom_actions)
-    }
+    engine = get_engine_or_404(game_manager, game_id)
+    return build_phantom_actions_payload(engine)
 
 
 # ========== WebSocket Endpoint ==========
