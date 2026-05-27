@@ -14,6 +14,7 @@ from datetime import datetime
 import httpx
 
 from game_human import submit_human_action_response, wait_for_human_action
+from game_loop import emit_initial_roles, run_game_round
 from game_catalog import (
     Camp,
     DEFAULT_MODEL_POOL,
@@ -1220,35 +1221,11 @@ class GameEngine:
         
         self.add_log("system", "游戏开始！")
         await self.emit_state()
-        
-        # Send private role info to each player
-        for seat, player in self.players.items():
-            await self.emit("your_role", player.to_private_dict(), to_seat=seat)
+        await emit_initial_roles(self)
         
         # Main loop
         while True:
-            # Check pause
-            while self.paused:
-                await asyncio.sleep(1)
-            
-            # Night
-            await self.run_night()
-            
-            winner = self.check_winner()
-            if winner:
-                await self.end_game(winner)
-                return
-            
-            # Check pause
-            while self.paused:
-                await asyncio.sleep(1)
-            
-            # Day
-            await self.run_day()
-            
-            winner = self.check_winner()
-            if winner:
-                await self.end_game(winner)
+            if await run_game_round(self):
                 return
 
     async def end_game(self, winner: str):
