@@ -35,6 +35,8 @@ backend/*.db
 backend/**/games.db
 backend/data/game_history.json
 backend/data/game_stats.json
+backend/data/games/
+backend/data/reports/
 
 # Config / secrets (if you add them later)
 .env
@@ -47,6 +49,8 @@ backend/data/game_stats.json
 # Node / Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 
 # Vite / build caches
 frontend/.vite/
