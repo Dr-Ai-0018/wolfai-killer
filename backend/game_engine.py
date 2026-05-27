@@ -212,6 +212,8 @@ class GameEngine:
         self.game_id = game_id
         self.config = config
         self.players: Dict[int, Player] = {}
+        self.total_players = 0
+        self.num_wolves = 0
         self.phase = GamePhase.WAITING
         self.day_count = 0
         self.night_count = 0
@@ -386,6 +388,9 @@ class GameEngine:
             random_models: 是否随机分配模型
             seat_model_map: 手动模型分配 {座位号: 模型名}
         """
+        self.total_players = total_players
+        self.num_wolves = num_wolves
+
         player_specs = build_player_specs(
             total_players=total_players,
             human_seats=human_seats,

@@ -116,6 +116,32 @@ class ApiSmokeTests(unittest.TestCase):
         phantom_actions = self.client.get(f"/api/game/{game_id}/phantom-actions")
         self.assertEqual(phantom_actions.status_code, 200)
 
+    def test_create_game_setup_tracks_total_players_for_runtime_scoring(self):
+        payload = {
+            "preset_id": "lovers_7p",
+            "human_seats": [1],
+            "random_models": False,
+            "seat_model_map": {
+                "1": "gpt-5.4-mini",
+                "2": "gpt-5.4-mini",
+                "3": "gpt-5.4-mini",
+                "4": "gpt-5.4-mini",
+                "5": "gpt-5.4-mini",
+                "6": "gpt-5.4-mini",
+                "7": "gpt-5.4-mini",
+            },
+            "god_mode": {"enabled": True, "password": "smoke-pass"},
+        }
+
+        created = self.client.post("/api/game/create", json=payload)
+        self.assertEqual(created.status_code, 200)
+        game_id = created.json()["game_id"]
+        engine = APPFILE.game_manager.get_game(game_id)
+
+        self.assertIsNotNone(engine)
+        self.assertEqual(engine.total_players, 7)
+        self.assertEqual(len(engine.players), 7)
+
     def test_stats_endpoints(self):
         overview = self.client.get("/api/stats/overview")
         self.assertEqual(overview.status_code, 200)
