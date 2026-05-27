@@ -70,8 +70,9 @@ WEREWOLF_DATA_DIR=./data
 
 - `backend/config.yaml` 用于静态配置，例如模型池和超时参数
 - `backend/data/roles.json`、`backend/data/personalities.json` 用于静态角色与人格目录
-- `WEREWOLF_DATA_DIR` 用于运行期数据目录，默认是 `backend/data/`
+- `WEREWOLF_DATA_DIR` 用于运行期数据目录；如果填写相对路径，会统一按 `backend/` 为基准解析，默认是 `backend/data/`
 - 运行期生成的 `game_history.json`、`game_stats.json`、`data/games/`、`data/reports/` 都属于本地数据产物，不应和源码改动混在同一次提交里
+- `backend/backend/data/` 属于历史上由错误相对路径产生的运行产物目录，不应再作为源码目录使用，也不应提交
 
 ### 2. 配置模型 ID 池
 

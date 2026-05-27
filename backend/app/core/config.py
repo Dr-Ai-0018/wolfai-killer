@@ -7,9 +7,12 @@ from typing import Dict, List, Optional, Any
 from functools import lru_cache
 
 import yaml
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+
+from game_storage import get_default_data_dir
 
 # Load .env file
 load_dotenv()
@@ -37,7 +40,7 @@ class Settings(BaseSettings):
     REDIS_URL: Optional[str] = os.getenv("REDIS_URL")
     
     # Runtime data
-    DATA_DIR: str = os.getenv("WEREWOLF_DATA_DIR", "data")
+    DATA_DIR: str = Field(default_factory=get_default_data_dir)
     
     # Timeouts
     DEFAULT_TIMEOUT: int = 60

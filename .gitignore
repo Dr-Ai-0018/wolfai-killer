@@ -37,6 +37,7 @@ backend/data/game_history.json
 backend/data/game_stats.json
 backend/data/games/
 backend/data/reports/
+backend/backend/data/
 
 # Config / secrets (if you add them later)
 .env

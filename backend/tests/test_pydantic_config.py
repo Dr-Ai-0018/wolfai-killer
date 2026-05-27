@@ -2,6 +2,7 @@ import pathlib
 import sys
 import unittest
 import warnings
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -35,3 +36,10 @@ class PydanticConfigTests(unittest.TestCase):
         self.assertEqual(payload.model_name, "gpt-5.4-mini")
         messages = [str(item.message) for item in caught]
         self.assertFalse(any('Field "model_name" has conflict with protected namespace "model_".' in message for message in messages))
+
+    def test_settings_data_dir_defaults_to_backend_data_directory(self):
+        expected = str((ROOT / "data").resolve())
+        with mock.patch.dict("os.environ", {}, clear=True):
+            settings = Settings()
+
+        self.assertEqual(settings.DATA_DIR, expected)

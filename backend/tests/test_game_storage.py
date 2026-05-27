@@ -3,6 +3,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -10,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from game_stats import GameStatsManager
-from game_storage import build_storage_paths, ensure_storage_dirs
+from game_storage import build_storage_paths, ensure_storage_dirs, get_default_data_dir
 
 
 class GameStorageTests(unittest.TestCase):
@@ -56,3 +57,15 @@ class GameStorageTests(unittest.TestCase):
             self.assertTrue(os.path.exists(manager.history_file))
             self.assertTrue(os.path.exists(manager.stats_file))
             self.assertTrue(os.path.exists(os.path.join(manager.raw_games_dir, "test-game-1.json")))
+
+    def test_default_data_dir_resolves_relative_env_path_from_backend_root(self):
+        expected = str((ROOT / "data").resolve())
+        with mock.patch.dict(os.environ, {"WEREWOLF_DATA_DIR": "./data"}, clear=False):
+            self.assertEqual(get_default_data_dir(), expected)
+
+    def test_build_storage_paths_resolves_relative_argument_from_backend_root(self):
+        expected = str((ROOT / "tmp-runtime-data").resolve())
+        paths = build_storage_paths("./tmp-runtime-data")
+
+        self.assertEqual(paths.data_dir, expected)
+        self.assertEqual(paths.reports_dir, os.path.join(expected, "reports"))
