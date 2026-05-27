@@ -67,6 +67,7 @@ from game_night_actions import (
     parse_human_target_response,
     parse_human_witch_heal_response,
 )
+from game_night_resolution import append_unique_deaths, build_night_announcement, should_apply_wolf_kill
 from game_vote import (
     apply_vote_rights,
     build_cast_vote_log,
@@ -1193,37 +1194,21 @@ class GameEngine:
         deaths = []
         
         # Wolf kill (unless healed or guarded)
-        if self.night_kill_target:
-            if self.night_healed:
-                pass  # Saved
-            elif self.night_guarded == self.night_kill_target:
-                pass  # Protected
-            else:
-                eliminated = await self.eliminate_player(self.night_kill_target, "wolf_kill")
-                for seat in eliminated:
-                    if seat not in deaths:
-                        deaths.append(seat)
+        if should_apply_wolf_kill(self.night_kill_target, self.night_healed, self.night_guarded):
+            eliminated = await self.eliminate_player(self.night_kill_target, "wolf_kill")
+            append_unique_deaths(deaths, eliminated)
         
         # Witch poison
         if self.night_poisoned:
             eliminated = await self.eliminate_player(self.night_poisoned, "poison")
-            for seat in eliminated:
-                if seat not in deaths:
-                    deaths.append(seat)
+            append_unique_deaths(deaths, eliminated)
         
         # Announce
         self.day_count += 1
         self.phase = GamePhase.DAY
-        
-        if deaths:
-            death_str = "、".join(str(d) for d in sorted(deaths))
-            self.add_log(
-                "death",
-                f"第{self.day_count}天：天亮了，昨晚{death_str}号死亡",
-                meta={"deaths": sorted(deaths)},
-            )
-        else:
-            self.add_log("phase", f"第{self.day_count}天：天亮了，昨晚是平安夜")
+
+        announcement = build_night_announcement(self.day_count, deaths)
+        self.add_log(announcement["type"], announcement["content"], meta=announcement["meta"])
         
         await self.emit_state()
 
