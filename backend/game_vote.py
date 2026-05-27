@@ -33,6 +33,31 @@ def apply_vote_rights(players: Dict[int, Any], alive_seats: Iterable[int], restr
     return active_restriction
 
 
+def build_valid_vote_targets(candidates: List[int], seat: int) -> List[int]:
+    """返回当前玩家可投票的目标列表。"""
+    return [candidate for candidate in candidates if candidate != seat]
+
+
+def build_human_vote_options(valid_targets: List[int], votes: Dict[int, int]) -> Dict[str, Any]:
+    """构建真人投票时的提示参数。"""
+    return {
+        "candidates": valid_targets,
+        "current_votes": votes.copy(),
+        "message": "请投票",
+    }
+
+
+def record_vote_choice(
+    votes: Dict[int, int],
+    last_voter_by_target: Dict[int, int],
+    voter: int,
+    target: int,
+) -> None:
+    """登记一次有效投票。"""
+    votes[voter] = target
+    last_voter_by_target[target] = voter
+
+
 def count_votes(votes: Dict[int, int]) -> Dict[int, int]:
     """将 voter -> target 映射转换为 target -> count 计票结果。"""
     vote_counts: Dict[int, int] = {}
@@ -85,6 +110,26 @@ def build_vote_result_log(resolution: VoteRoundResolution) -> Dict[str, Any]:
             "vote_counts": resolution.vote_counts,
             "eliminated": False,
         },
+    }
+
+
+def build_skipped_vote_log(seat: int) -> Dict[str, Any]:
+    """构建无投票权时的跳过日志。"""
+    return {
+        "type": "vote",
+        "content": f"{seat}号本轮无投票权，自动跳过",
+        "seat": seat,
+        "meta": {"voter": seat, "skipped": True},
+    }
+
+
+def build_cast_vote_log(voter: int, target: int) -> Dict[str, Any]:
+    """构建正常落票日志。"""
+    return {
+        "type": "vote",
+        "content": f"{voter}号投给了{target}号",
+        "seat": voter,
+        "meta": {"voter": voter, "target": target},
     }
 
 

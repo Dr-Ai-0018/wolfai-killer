@@ -9,11 +9,16 @@ if str(ROOT) not in sys.path:
 
 from game_vote import (
     apply_vote_rights,
+    build_cast_vote_log,
+    build_human_vote_options,
+    build_skipped_vote_log,
     build_scapegoat_tie_log,
+    build_valid_vote_targets,
     build_vote_eliminate_log,
     build_vote_result_log,
     build_vote_tie_log,
     count_votes,
+    record_vote_choice,
     resolve_vote_round,
 )
 
@@ -57,6 +62,26 @@ class GameVoteTests(unittest.TestCase):
         self.assertEqual(resolution.max_votes, 2)
         self.assertEqual(resolution.top_targets, [3])
 
+    def test_build_valid_vote_targets_excludes_self(self):
+        self.assertEqual(build_valid_vote_targets([1, 2, 3, 4], 3), [1, 2, 4])
+
+    def test_build_human_vote_options_copies_current_votes(self):
+        votes = {1: 3}
+
+        options = build_human_vote_options([2, 3], votes)
+        votes[2] = 1
+
+        self.assertEqual(options, {"candidates": [2, 3], "current_votes": {1: 3}, "message": "请投票"})
+
+    def test_record_vote_choice_updates_votes_and_last_voter(self):
+        votes = {1: 3}
+        last_voter_by_target = {3: 1}
+
+        record_vote_choice(votes, last_voter_by_target, 2, 3)
+
+        self.assertEqual(votes, {1: 3, 2: 3})
+        self.assertEqual(last_voter_by_target, {3: 2})
+
     def test_resolve_vote_round_returns_none_without_votes(self):
         self.assertIsNone(resolve_vote_round({}))
 
@@ -75,11 +100,15 @@ class GameVoteTests(unittest.TestCase):
 
         eliminate_payload = build_vote_eliminate_log(resolution, [3, 4])
         result_payload = build_vote_result_log(resolution)
+        cast_payload = build_cast_vote_log(2, 3)
+        skipped_payload = build_skipped_vote_log(1)
 
         self.assertEqual(eliminate_payload["type"], "eliminate")
         self.assertEqual(eliminate_payload["meta"]["chain"], [3, 4])
         self.assertEqual(result_payload["type"], "vote_result")
         self.assertFalse(result_payload["meta"]["eliminated"])
+        self.assertEqual(cast_payload["meta"], {"voter": 2, "target": 3})
+        self.assertEqual(skipped_payload["meta"], {"voter": 1, "skipped": True})
 
     def test_build_tie_logs(self):
         resolution = resolve_vote_round({1: 2, 2: 3, 3: 2, 4: 3})

@@ -31,10 +31,15 @@ from game_ai_context import (
 )
 from game_vote import (
     apply_vote_rights,
+    build_cast_vote_log,
+    build_human_vote_options,
+    build_skipped_vote_log,
     build_scapegoat_tie_log,
+    build_valid_vote_targets,
     build_vote_eliminate_log,
     build_vote_result_log,
     build_vote_tie_log,
+    record_vote_choice,
     resolve_vote_round,
 )
 from game_review import (
@@ -1715,32 +1720,24 @@ class GameEngine:
         for seat in sorted(self.get_alive_seats()):
             player = self.players[seat]
             if not player.can_vote:
-                self.add_log("vote", f"{seat}号本轮无投票权，自动跳过", seat=seat, meta={"voter": seat, "skipped": True})
+                payload = build_skipped_vote_log(seat)
+                self.add_log(payload["type"], payload["content"], seat=payload["seat"], meta=payload["meta"])
                 await self.emit_state()
                 await asyncio.sleep(0.3)
                 continue
-            valid_targets = [c for c in candidates if c != seat]
+            valid_targets = build_valid_vote_targets(candidates, seat)
             
             if player.is_human:
-                response = await self.wait_for_human(seat, "vote", {
-                    "candidates": valid_targets,
-                    "current_votes": votes.copy(),  # 传递当前投票情况
-                    "message": "请投票",
-                })
+                response = await self.wait_for_human(seat, "vote", build_human_vote_options(valid_targets, votes))
                 target = response.get("target") if response else None
             else:
                 # AI投票 - 使用LLM决策，传入当前投票情况
                 target = await self.generate_ai_vote(player, valid_targets, votes)
             
             if target and target in valid_targets:
-                votes[seat] = target
-                last_voter_by_target[target] = seat
-                self.add_log(
-                    "vote",
-                    f"{seat}号投给了{target}号",
-                    seat=seat,
-                    meta={"voter": seat, "target": target},
-                )
+                record_vote_choice(votes, last_voter_by_target, seat, target)
+                payload = build_cast_vote_log(seat, target)
+                self.add_log(payload["type"], payload["content"], seat=payload["seat"], meta=payload["meta"])
                 # 每次投票后立即广播，让后面的玩家能看到
                 await self.emit_state()
                 await asyncio.sleep(0.3)  # 短暂延迟，让前端有时间显示
