@@ -49,13 +49,85 @@
               </span>
             </div>
             <div class="text-white font-medium">{{ player.seat }}号 - {{ player.role }}</div>
-            <div class="text-sm text-gray-400">{{ player.is_human ? '真人' : (player.personality_name || 'AI') }}</div>
+            <div class="text-sm text-gray-400">{{ player.is_human ? '真人' : (player.personality_name || '智能玩家') }}</div>
             <div v-if="!player.alive" class="text-xs text-red-500 mt-1">已死亡</div>
           </div>
         </div>
       </div>
 
       <div class="glass rounded-2xl p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">公开局势摘要</h2>
+        <div v-if="hasDaySummary" class="grid md:grid-cols-3 gap-4 mb-6">
+          <div class="rounded-xl bg-game-dark/40 p-4">
+            <div class="text-sm text-gray-400 mb-2">身份跳法</div>
+            <div v-if="claimEntries.length > 0" class="space-y-2">
+              <div v-for="entry in claimEntries" :key="entry.role" class="text-gray-200">
+                {{ entry.role }}: {{ entry.seatsText }}
+              </div>
+            </div>
+            <div v-else class="text-gray-500">无</div>
+          </div>
+          <div class="rounded-xl bg-game-dark/40 p-4">
+            <div class="text-sm text-gray-400 mb-2">票型</div>
+            <div v-if="voteCountEntries.length > 0" class="space-y-2">
+              <div v-for="entry in voteCountEntries" :key="entry.seat" class="text-gray-200">
+                {{ entry.seat }}号: {{ entry.count }}票
+              </div>
+            </div>
+            <div v-else class="text-gray-500">无</div>
+          </div>
+          <div class="rounded-xl bg-game-dark/40 p-4">
+            <div class="text-sm text-gray-400 mb-2">压力榜</div>
+            <div v-if="pressureBoard.length > 0" class="space-y-2">
+              <div v-for="item in pressureBoard" :key="item.seat" class="text-gray-200">
+                {{ item.seat }}号: 点名{{ item.mentions }} / 票{{ item.votes }}
+              </div>
+            </div>
+            <div v-else class="text-gray-500">无</div>
+          </div>
+        </div>
+
+        <div class="mb-6 rounded-xl bg-game-dark/40 p-4">
+          <div class="text-sm text-gray-400 mb-2">关键事件</div>
+          <div v-if="publicRoleEvents.length > 0" class="space-y-2">
+            <div v-for="(event, index) in publicRoleEvents" :key="`${index}-${event}`" class="rounded-lg bg-slate-950/40 p-3">
+              <div class="text-gray-200">{{ event }}</div>
+              <div v-if="explainPublicEvent(event)" class="mt-1 text-xs text-slate-400">
+                {{ explainPublicEvent(event) }}
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-gray-500">暂无关键角色事件</div>
+        </div>
+
+        <div class="mb-6 rounded-xl bg-game-dark/40 p-4">
+          <div class="text-sm text-gray-400 mb-2">我的关键事件</div>
+          <div v-if="playerEventCards.length > 0" class="grid md:grid-cols-2 gap-3">
+            <div v-for="card in playerEventCards" :key="`${card.seat}-${card.role}`"
+                 class="rounded-xl border border-game-border bg-slate-950/40 p-3">
+              <div class="mb-2 flex items-center justify-between">
+                <div class="text-white font-medium">{{ card.seat }}号 · {{ card.role }}</div>
+                <div :class="[
+                  'text-xs px-2 py-1 rounded',
+                  card.isHuman ? 'bg-game-accent/20 text-game-accent-light' : 'bg-slate-700/50 text-slate-300'
+                ]">
+                  {{ card.isHuman ? '真人' : '智能玩家' }}
+                </div>
+              </div>
+              <div v-if="card.events.length > 0" class="space-y-2">
+                <div v-for="(event, index) in card.events" :key="`${card.seat}-${index}`" class="rounded-lg bg-black/20 p-2">
+                  <div class="text-sm text-gray-200">{{ event }}</div>
+                  <div v-if="explainPublicEvent(event)" class="mt-1 text-xs text-slate-400">
+                    {{ explainPublicEvent(event) }}
+                  </div>
+                </div>
+              </div>
+              <div v-else class="text-sm text-gray-500">本局没有捕捉到公开关键事件</div>
+            </div>
+          </div>
+          <div v-else class="text-gray-500">暂无可提炼的个人关键事件</div>
+        </div>
+
         <h2 class="text-xl font-semibold text-white mb-4">游戏日志</h2>
         <div v-if="game.logs && game.logs.length > 0" class="space-y-2 max-h-96 overflow-y-auto">
           <div v-for="(log, index) in game.logs" :key="index"
@@ -73,17 +145,40 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { statsApi } from '@/api'
+import { buildPlayerEventCards, explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
 
 const route = useRoute()
-const game = ref({ players: [], logs: [] })
+const game = ref({ players: [], logs: [], day_summary: null })
+
+const daySummary = computed(() => game.value.day_summary || {})
+const hasDaySummary = computed(() => !!game.value.day_summary)
+const claimEntries = computed(() => {
+  const claims = daySummary.value.claims || {}
+  return Object.entries(claims)
+    .filter(([, seats]) => Array.isArray(seats) && seats.length > 0)
+    .map(([role, seats]) => ({
+      role,
+      seatsText: seats.map((seat) => `${seat}号`).join('、'),
+    }))
+})
+const voteCountEntries = computed(() => {
+  const counts = daySummary.value.vote_counts || {}
+  return Object.entries(counts)
+    .map(([seat, count]) => ({ seat: Number(seat), count: Number(count) }))
+    .sort((a, b) => b.count - a.count || a.seat - b.seat)
+})
+const pressureBoard = computed(() => daySummary.value.pressure_board || [])
+const publicRoleEvents = computed(() => extractPublicRoleEvents(game.value.logs || []))
+const playerEventCards = computed(() => buildPlayerEventCards(game.value.players || [], game.value.logs || []))
 
 const getRoleIcon = (role) => {
   const icons = { 
     '狼人': '🐺', '村民': '👨‍🌾', '预言家': '🔮', '女巫': '🧙‍♀️', '猎人': '🏹', '守卫': '🛡️',
-    '狼王': '👑', '白狼王': '🐺', '狼美人': '💋', '丘比特': '💘', '白痴': '🤪', '长老': '👴'
+    '狼王': '👑', '白狼王': '🐺', '狼美人': '💋', '丘比特': '💘', '白痴': '🤪', '长老': '👴',
+    '圣徒': '⛪', '野孩子': '🧒', '共济会': '🤝', '被诅咒者': '🕯️', '受祝福者': '✨'
   }
   return icons[role] || '❓'
 }
@@ -113,9 +208,9 @@ onMounted(async () => {
   try {
     const res = await statsApi.getGameDetail(route.params.gameId)
     game.value = res.data
-    console.log('Game detail loaded:', res.data)
+    console.log('对局详情已加载', res.data)
   } catch (error) {
-    console.error('Failed to load game detail:', error)
+    console.error('加载对局详情失败', error)
   }
 })
 </script>

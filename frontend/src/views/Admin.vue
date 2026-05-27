@@ -71,7 +71,7 @@
             </div>
             <div class="flex items-center gap-4">
               <div v-if="tokenExpiry" class="text-xs text-slate-500">
-                Token有效期至: {{ formatExpiry(tokenExpiry) }}
+                登录有效期至：{{ formatExpiry(tokenExpiry) }}
               </div>
               <button @click="handleLogout" 
                       class="px-4 py-2 bg-slate-800/80 hover:bg-red-600/20 border border-slate-700 hover:border-red-500/50 
@@ -92,12 +92,12 @@
               <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 flex items-center justify-center mr-3">
                 <span class="text-xl">🔑</span>
               </span>
-              API 配置
+              接口配置
             </h2>
             
             <div class="space-y-5">
               <div>
-                <label class="block text-sm font-medium text-slate-300 mb-2">API 地址</label>
+                <label class="block text-sm font-medium text-slate-300 mb-2">接口地址</label>
                 <input v-model="config.apiUrl" 
                        type="url"
                        placeholder="https://api.openai.com/v1"
@@ -106,7 +106,7 @@
               </div>
               
               <div>
-                <label class="block text-sm font-medium text-slate-300 mb-2">API Key</label>
+                <label class="block text-sm font-medium text-slate-300 mb-2">接口密钥</label>
                 <div class="relative">
                   <input v-model="config.apiKey" 
                          :type="showApiKey ? 'text' : 'password'"
@@ -148,21 +148,21 @@
             
             <div class="space-y-5">
               <p class="text-slate-400 text-sm">
-                从配置的 API 地址获取可用模型 ID 列表
+                从已配置的接口地址获取可用模型编号列表
               </p>
               
               <button @click="fetchRemoteModels" 
                       :disabled="fetching"
                       class="w-full py-3 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 
                              rounded-xl text-white font-medium transition-all disabled:opacity-50 shadow-lg shadow-blue-500/20">
-                {{ fetching ? '⏳ 获取中...' : '📥 获取模型 ID 列表' }}
+                {{ fetching ? '⏳ 获取中...' : '📥 获取模型编号列表' }}
               </button>
               
               <!-- Fetched Models List -->
               <div v-if="fetchedModels.length > 0" class="space-y-3">
                 <div class="flex items-center justify-between">
                   <span class="text-sm text-slate-400">
-                    获取到 <span class="text-blue-400 font-bold">{{ fetchedModels.length }}</span> 个模型 ID
+                    获取到 <span class="text-blue-400 font-bold">{{ fetchedModels.length }}</span> 个模型编号
                   </span>
                   <div class="flex gap-3">
                     <button @click="selectAllModels" class="text-xs text-blue-400 hover:text-blue-300">全选</button>
@@ -183,7 +183,7 @@
                         :disabled="selectedFetchedModels.length === 0"
                         class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white text-sm font-medium 
                                transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                  ➕ 添加 {{ selectedFetchedModels.length }} 个模型 ID 到配置
+                  ➕ 添加 {{ selectedFetchedModels.length }} 个模型编号到配置
                 </button>
               </div>
             </div>
@@ -196,7 +196,7 @@
                 <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-green-500/20 flex items-center justify-center mr-3">
                   <span class="text-xl">📋</span>
                 </span>
-                当前游戏模型 ID 列表
+                当前游戏模型编号列表
               </h2>
               <span class="px-3 py-1 bg-slate-700/50 rounded-full text-sm text-slate-400">
                 共 {{ currentConfig.model_ids?.length || 0 }} 个模型
@@ -215,14 +215,14 @@
                   </button>
                 </div>
                 <div v-if="!currentConfig.model_ids?.length" class="text-slate-500 text-sm flex items-center">
-                  <span class="mr-2">📭</span> 暂无模型 ID，请从远程获取或手动添加
+                  <span class="mr-2">📭</span> 暂无模型编号，请从远程获取或手动添加
                 </div>
               </div>
               
               <!-- Add Model Input -->
               <div class="flex gap-3">
                 <input v-model="newModel" 
-                       placeholder="手动添加模型 ID..."
+                       placeholder="手动添加模型编号..."
                        @keyup.enter="addModel"
                        class="flex-1 bg-slate-900/50 border border-slate-600 rounded-xl px-4 py-3 text-white
                               focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all">
@@ -239,7 +239,7 @@
                       :disabled="saving"
                       class="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 
                              rounded-xl text-white font-medium transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/20">
-                {{ saving ? '保存中...' : '💾 保存模型 ID 配置' }}
+                {{ saving ? '保存中...' : '💾 保存模型编号配置' }}
               </button>
             </div>
           </div>
@@ -260,7 +260,7 @@
                        type="number"
                        disabled
                        class="w-full bg-slate-900/30 border border-slate-700 rounded-xl px-4 py-3 text-slate-400 cursor-not-allowed">
-                <p class="mt-2 text-xs text-slate-500">通过 config.yaml 修改</p>
+                <p class="mt-2 text-xs text-slate-500">通过后端配置文件修改</p>
               </div>
               
               <div>
@@ -372,7 +372,7 @@ const checkAdminStatus = async () => {
       }
     }
   } catch (error) {
-    console.error('Failed to check admin status:', error)
+    console.error('检查管理状态失败：', error)
   }
 }
 
@@ -435,7 +435,7 @@ const saveApiConfig = async () => {
     await adminApi.updateConfig(updates)
     await loadConfig()
     config.apiKey = ''
-    showToast('API配置已保存', 'success')
+    showToast('接口配置已保存', 'success')
   } catch (error) {
     if (error.response?.status === 401) {
       handleLogout()
@@ -461,7 +461,7 @@ const testConnection = async () => {
     
     const res = await adminApi.fetchModels(apiUrl, apiKey)
     if (res.data.success) {
-      showToast(`连接成功！获取到 ${res.data.total} 个模型 ID`, 'success')
+      showToast(`连接成功！获取到 ${res.data.total} 个模型编号`, 'success')
     } else {
       showToast('连接失败: ' + res.data.message, 'error')
     }
@@ -493,7 +493,7 @@ const fetchRemoteModels = async () => {
     if (res.data.success) {
       fetchedModels.value = res.data.model_ids || res.data.models || []
       selectedFetchedModels.value = []
-      showToast(`获取到 ${res.data.total} 个模型 ID`, 'success')
+      showToast(`获取到 ${res.data.total} 个模型编号`, 'success')
     } else {
       showToast('获取失败: ' + res.data.message, 'error')
     }
@@ -548,7 +548,7 @@ const saveModels = async () => {
   saving.value = true
   try {
     await adminApi.updateConfig({ model_ids: currentConfig.value.model_ids })
-    showToast('模型 ID 配置已保存', 'success')
+    showToast('模型编号配置已保存', 'success')
   } catch (error) {
     if (error.response?.status === 401) {
       handleLogout()

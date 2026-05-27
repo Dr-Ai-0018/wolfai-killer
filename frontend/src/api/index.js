@@ -146,12 +146,12 @@ export class GameWebSocket {
 
   connect() {
     const url = `${WS_BASE}/ws/${this.gameId}/${this.seat}`
-    console.log('Connecting to WebSocket:', url)
+    console.log('正在连接实时通道：', url)
     
     this.ws = new WebSocket(url)
     
     this.ws.onopen = () => {
-      console.log('WebSocket connected')
+      console.log('实时通道已连接')
       this.reconnectAttempts = 0
       if (this.callbacks.onConnect) {
         this.callbacks.onConnect()
@@ -161,7 +161,7 @@ export class GameWebSocket {
     this.ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data)
-        console.log('WS message:', message)
+        console.log('收到实时消息：', message)
         
         if (this.callbacks.onMessage) {
           this.callbacks.onMessage(message)
@@ -183,13 +183,16 @@ export class GameWebSocket {
         if (message.event === 'seer_result' && this.callbacks.onSeerResult) {
           this.callbacks.onSeerResult(message.data)
         }
+        if (message.event === 'fox_result' && this.callbacks.onFoxResult) {
+          this.callbacks.onFoxResult(message.data)
+        }
       } catch (e) {
-        console.error('Failed to parse WS message:', e)
+        console.error('解析实时消息失败：', e)
       }
     }
     
     this.ws.onclose = () => {
-      console.log('WebSocket closed')
+      console.log('实时通道已关闭')
       if (this.callbacks.onDisconnect) {
         this.callbacks.onDisconnect()
       }
@@ -197,13 +200,13 @@ export class GameWebSocket {
       // Auto reconnect
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.reconnectAttempts++
-        console.log(`Reconnecting... attempt ${this.reconnectAttempts}`)
+        console.log(`正在重连，第 ${this.reconnectAttempts} 次尝试`)
         setTimeout(() => this.connect(), 2000)
       }
     }
     
     this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
+      console.error('实时通道发生错误：', error)
       if (this.callbacks.onError) {
         this.callbacks.onError(error)
       }

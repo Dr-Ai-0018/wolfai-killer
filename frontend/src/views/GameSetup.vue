@@ -24,6 +24,14 @@
             </select>
           </div>
         </div>
+
+        <div v-if="smallLobbyWarning" class="mt-4 rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
+          <div class="text-sm font-medium text-amber-300 mb-1">小局风险提示</div>
+          <p class="text-sm text-amber-100/80 leading-relaxed">
+            5 到 6 人局波动很大。当前版本里，`5人2狼` 明显偏狼强，`5人1狼` 又容易偏好人强。
+            当前默认 `5人局` 只是偏保守、偏好人侧的临时推荐；即使收紧了女巫首夜救人，它仍未验证平衡。不要手动堆出极端狼人数。
+          </p>
+        </div>
         
         <!-- Human Seat Selection -->
         <div class="mt-6">
@@ -43,7 +51,7 @@
           <p class="text-sm text-gray-500 mt-2">
             已选择 {{ config.humanSeats.length }} 个真人玩家座位
             <span v-if="config.humanSeats.length === 0" class="text-yellow-500">
-              （不选择则全部为 AI 对战）
+              （不选择则全部为智能玩家对战）
             </span>
           </p>
         </div>
@@ -89,29 +97,39 @@
           </div>
         </div>
         
-        <div class="mt-4 p-3 rounded-lg" :class="roleCountValid ? 'bg-good-green/10' : 'bg-wolf-red/10'">
-          <p :class="roleCountValid ? 'text-good-green' : 'text-wolf-red'">
+        <div class="mt-4 p-3 rounded-lg" :class="roleCountValid && wolfCountValid ? 'bg-good-green/10' : 'bg-wolf-red/10'">
+          <p :class="roleCountValid && wolfCountValid ? 'text-good-green' : 'text-wolf-red'">
             当前配置：{{ totalRoleCount }} / {{ config.totalPlayers }} 人
             <span v-if="!roleCountValid">(请调整角色数量)</span>
+            <span v-else-if="!wolfCountValid">(狼人阵营人数过多，当前人数局不允许)</span>
+          </p>
+        </div>
+
+        <div class="mt-4 rounded-xl border border-sky-500/20 bg-sky-950/20 p-4">
+          <div class="text-sm font-medium text-sky-200 mb-1">扩展角色提示</div>
+          <p class="text-sm text-sky-100/75 leading-relaxed">
+            当前已优先接入并建议测试的扩展角色：`丘比特`、`长老`、`白痴`、`野孩子`、`共济会`、`圣徒`。
+            现已补充 `被诅咒者`、`受祝福者`、`狐狸`、`天使`、`替罪羊` 作为低耦合扩展角色。
+            `狼王`、`白狼王`、`狼美人` 仍以占位为主，暂不建议正式开局使用。
           </p>
         </div>
       </div>
 
-      <!-- AI Configuration -->
+      <!-- 智能玩家配置 -->
       <div class="glass rounded-2xl p-6 mb-6">
-        <h2 class="text-xl font-semibold text-white mb-4">🤖 AI 配置</h2>
+        <h2 class="text-xl font-semibold text-white mb-4">🤖 智能玩家配置</h2>
         
         <div class="space-y-4">
           <label class="flex items-center cursor-pointer">
             <input type="checkbox" v-model="config.aiConfig.randomModel" 
                    class="w-5 h-5 rounded bg-game-dark border-game-border text-game-accent focus:ring-game-accent">
-            <span class="ml-3 text-white">随机分配 AI 模型</span>
+            <span class="ml-3 text-white">随机分配智能玩家模型</span>
           </label>
           
           <label class="flex items-center cursor-pointer">
             <input type="checkbox" v-model="config.aiConfig.randomPersonality" 
                    class="w-5 h-5 rounded bg-game-dark border-game-border text-game-accent focus:ring-game-accent">
-            <span class="ml-3 text-white">随机分配 AI 人格</span>
+            <span class="ml-3 text-white">随机分配智能玩家人格</span>
           </label>
         </div>
         
@@ -119,7 +137,7 @@
         <div v-if="!config.aiConfig.randomModel" class="mt-6 p-4 bg-game-dark/50 rounded-xl border border-game-border">
           <h4 class="text-sm font-medium text-white mb-4 flex items-center">
             <span class="mr-2">⚙️</span>
-            为每个 AI 座位分配模型
+            为每个智能玩家座位分配模型
           </h4>
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             <div v-for="seat in config.totalPlayers" :key="seat"
@@ -141,7 +159,7 @@
             </div>
           </div>
           <p class="text-xs text-gray-500 mt-3">
-            提示：未指定的 AI 座位将使用第一个可用模型
+            提示：未指定的智能玩家座位将使用第一个可用模型
           </p>
         </div>
         
@@ -238,9 +256,17 @@ const config = ref({
     WITCH: 1,
     GUARD: 1,
     HUNTER: 1,
+    FOX: 0,
+    ANGEL: 0,
+    SCAPEGOAT: 0,
+    MASON: 0,
+    SUPER_SAINT: 0,
     CUPID: 0,
     IDIOT: 0,
     ELDER: 0,
+    WILD_CHILD: 0,
+    CURSED: 0,
+    BLESSED: 0,
     // 好人阵营 - 平民
     VILLAGER: 5
   },
@@ -257,13 +283,13 @@ const config = ref({
 })
 
 // 可选人数范围
-const playerOptions = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+const playerOptions = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
 // 狼人数量选项（根据总人数动态计算）
 const wolfOptions = computed(() => {
   const total = config.value.totalPlayers
-  const maxWolves = Math.floor(total / 3)  // 狼人最多占三分之一
-  return Array.from({ length: maxWolves }, (_, i) => i + 2)  // 最少 2 狼
+  const maxWolves = Math.max(1, Math.floor((total - 1) / 3))
+  return Array.from({ length: maxWolves }, (_, i) => i + 1)
 })
 
 // 总角色数
@@ -275,6 +301,13 @@ const totalRoleCount = computed(() => {
 const roleCountValid = computed(() => {
   return totalRoleCount.value === config.value.totalPlayers
 })
+
+const wolfCountValid = computed(() => {
+  const maxWolves = Math.max(1, Math.floor((config.value.totalPlayers - 1) / 3))
+  return totalWolfCount.value >= 1 && totalWolfCount.value <= maxWolves
+})
+
+const smallLobbyWarning = computed(() => config.value.totalPlayers <= 6)
 
 const passwordError = computed(() => {
   if (!config.value.godMode.enabled) return ''
@@ -288,12 +321,7 @@ const passwordError = computed(() => {
 const onTotalPlayersChange = () => {
   // 清理超出范围的真人座位
   config.value.humanSeats = config.value.humanSeats.filter(s => s <= config.value.totalPlayers)
-  // 调整狼人数量
-  const maxWolves = Math.floor(config.value.totalPlayers / 3)
-  if (config.value.roleConfig.WOLF > maxWolves) {
-    config.value.roleConfig.WOLF = maxWolves
-  }
-  updateVillagerCount()
+  applyRecommendedSetup(config.value.totalPlayers)
 }
 
 // 更新村民数量（自动填充）
@@ -339,7 +367,7 @@ const totalWolfCount = computed(() => {
 const canIncreaseRole = (code) => {
   // 狼人阵营角色
   if (wolfRoles.includes(code)) {
-    const maxWolves = Math.floor(config.value.totalPlayers / 3)
+    const maxWolves = Math.max(1, Math.floor((config.value.totalPlayers - 1) / 3))
     return totalWolfCount.value < maxWolves
   }
   if (code === 'VILLAGER') {
@@ -354,6 +382,9 @@ const canDecreaseRole = (code) => {
   // 狼人阵营角色
   if (wolfRoles.includes(code)) {
     if (code === 'WOLF') {
+      if (config.value.totalPlayers === 5) {
+        return config.value.roleConfig.WOLF > 1
+      }
       // 普通狼人至少要有 1 个（如果没有其他狼人角色）
       const otherWolves = totalWolfCount.value - config.value.roleConfig.WOLF
       return config.value.roleConfig.WOLF > (otherWolves > 0 ? 0 : 1)
@@ -375,6 +406,55 @@ const toggleHumanSeat = (seat) => {
   }
 }
 
+const buildEmptyRoleConfig = () => ({
+  WOLF: 0,
+  WOLF_KING: 0,
+  WHITE_WOLF: 0,
+  BEAUTY: 0,
+  SEER: 0,
+  WITCH: 0,
+  GUARD: 0,
+  HUNTER: 0,
+  FOX: 0,
+  ANGEL: 0,
+  SCAPEGOAT: 0,
+  MASON: 0,
+  SUPER_SAINT: 0,
+  CUPID: 0,
+  IDIOT: 0,
+  ELDER: 0,
+  WILD_CHILD: 0,
+  CURSED: 0,
+  BLESSED: 0,
+  VILLAGER: 0
+})
+
+const applyRecommendedSetup = (totalPlayers) => {
+  const roleConfig = buildEmptyRoleConfig()
+
+  if (totalPlayers === 5) {
+    Object.assign(roleConfig, { WOLF: 1, SEER: 1, WITCH: 1, VILLAGER: 2 })
+  } else if (totalPlayers === 6) {
+    Object.assign(roleConfig, { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, VILLAGER: 1 })
+  } else if (totalPlayers === 7) {
+    Object.assign(roleConfig, { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, HUNTER: 1, VILLAGER: 1 })
+  } else if (totalPlayers === 8) {
+    Object.assign(roleConfig, { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, HUNTER: 1, VILLAGER: 2 })
+  } else {
+    roleConfig.WOLF = Math.min(Math.floor(totalPlayers / 3), 3)
+    roleConfig.SEER = 1
+    roleConfig.WITCH = 1
+    roleConfig.GUARD = 1
+    roleConfig.HUNTER = 1
+    roleConfig.VILLAGER = Math.max(0, totalPlayers - roleConfig.WOLF - 4)
+    const assigned = Object.values(roleConfig).reduce((sum, count) => sum + count, 0)
+    roleConfig.VILLAGER += Math.max(0, totalPlayers - assigned)
+  }
+
+  config.value.roleConfig = roleConfig
+  updateVillagerCount()
+}
+
 const getModelId = (model) => {
   if (typeof model === 'string') return model
   return model?.id || model?.name || model?.model || ''
@@ -389,6 +469,10 @@ const createGame = async () => {
   // 验证角色数量
   if (!roleCountValid.value) {
     alert('角色数量不匹配，请调整配置')
+    return
+  }
+  if (!wolfCountValid.value) {
+    alert('狼人阵营人数过多，当前人数局不允许')
     return
   }
   
@@ -426,7 +510,7 @@ const createGame = async () => {
     const gameId = response.data.game_id
     router.push(`/game/${gameId}`)
   } catch (error) {
-    console.error('Failed to create game:', error)
+    console.error('创建游戏失败：', error)
     alert('创建游戏失败，请重试')
   } finally {
     loading.value = false
@@ -445,9 +529,17 @@ const defaultRoles = [
   { code: 'WITCH', name: '女巫', camp: '好人阵营', icon: '🧙‍♀️' },
   { code: 'GUARD', name: '守卫', camp: '好人阵营', icon: '🛡️' },
   { code: 'HUNTER', name: '猎人', camp: '好人阵营', icon: '🏹' },
+  { code: 'FOX', name: '狐狸', camp: '好人阵营', icon: '🦊' },
+  { code: 'ANGEL', name: '天使', camp: '第三方阵营', icon: '😇' },
+  { code: 'SCAPEGOAT', name: '替罪羊', camp: '好人阵营', icon: '🐐' },
+  { code: 'MASON', name: '共济会', camp: '好人阵营', icon: '🤝' },
+  { code: 'SUPER_SAINT', name: '圣徒', camp: '好人阵营', icon: '⛪' },
   { code: 'CUPID', name: '丘比特', camp: '好人阵营', icon: '💘' },
   { code: 'IDIOT', name: '白痴', camp: '好人阵营', icon: '🤪' },
   { code: 'ELDER', name: '长老', camp: '好人阵营', icon: '👴' },
+  { code: 'WILD_CHILD', name: '野孩子', camp: '好人阵营', icon: '🧒' },
+  { code: 'CURSED', name: '被诅咒者', camp: '好人阵营', icon: '🕯️' },
+  { code: 'BLESSED', name: '受祝福者', camp: '好人阵营', icon: '✨' },
   // 好人阵营 - 平民
   { code: 'VILLAGER', name: '村民', camp: '好人阵营', icon: '👨‍🌾' }
 ]
@@ -459,6 +551,7 @@ const defaultModels = [
 ]
 
 onMounted(async () => {
+  applyRecommendedSetup(config.value.totalPlayers)
   // 先设置默认值
   roles.value = defaultRoles
   models.value = defaultModels
@@ -476,7 +569,7 @@ onMounted(async () => {
       models.value = modelsRes.data
     }
   } catch (error) {
-    console.error('Failed to load config:', error)
+    console.error('加载配置失败：', error)
     // 保持默认数据
   }
 })

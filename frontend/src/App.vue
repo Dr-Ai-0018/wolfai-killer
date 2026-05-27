@@ -4,8 +4,8 @@
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex items-center justify-between h-16">
           <router-link to="/" class="flex items-center space-x-3">
-            <img src="/wolf.svg" alt="Logo" class="w-8 h-8" />
-            <span class="text-xl font-bold text-game-accent-light">MOONLIGHT</span>
+            <img src="/wolf.svg" alt="狼人杀徽记" class="w-8 h-8" />
+            <span class="text-xl font-bold text-game-accent-light">月夜狼人杀</span>
           </router-link>
           
           <div class="flex items-center space-x-6">

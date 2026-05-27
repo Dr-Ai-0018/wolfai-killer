@@ -315,7 +315,7 @@ const loadPage = async (page) => {
     currentPage.value = res.data.page
     totalPages.value = res.data.pages
   } catch (error) {
-    console.error('Failed to load history:', error)
+    console.error('加载历史记录失败：', error)
   } finally {
     loading.value = false
   }
@@ -343,7 +343,7 @@ onMounted(async () => {
     games.value = historyRes.data?.games || []
     totalPages.value = historyRes.data?.pages || 1
   } catch (error) {
-    console.error('Failed to load data:', error)
+    console.error('加载统计数据失败：', error)
   } finally {
     loading.value = false
   }

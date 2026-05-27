@@ -4,15 +4,15 @@
     <section class="relative py-20 px-4 overflow-hidden">
       <div class="max-w-6xl mx-auto text-center">
         <div class="mb-8 animate-float">
-          <img src="/wolf.svg" alt="Wolf" class="w-32 h-32 mx-auto" />
+          <img src="/wolf.svg" alt="狼人图标" class="w-32 h-32 mx-auto" />
         </div>
         <h1 class="text-5xl md:text-7xl font-bold mb-6">
-          <span class="text-white">AI </span>
+          <span class="text-white">智能 </span>
           <span class="text-game-accent-light">狼人杀</span>
         </h1>
         <p class="text-xl text-gray-400 mb-8 max-w-2xl mx-auto">
-          与 12 种独特人格的 AI 玩家一起，体验前所未有的狼人杀对局。
-          每个 AI 都有自己的思维方式和行为风格。
+          与 12 种独特人格的智能玩家一起，体验前所未有的狼人杀对局。
+          每个智能玩家都有自己的思维方式和行为风格。
         </p>
         <div class="flex flex-wrap justify-center gap-4">
           <router-link 
@@ -51,9 +51,9 @@
         <div class="grid md:grid-cols-3 gap-8">
           <div class="glass rounded-2xl p-6 card-hover">
             <div class="text-4xl mb-4">🤖</div>
-            <h3 class="text-xl font-semibold text-white mb-2">多模型 AI</h3>
+            <h3 class="text-xl font-semibold text-white mb-2">多模型智能玩家</h3>
             <p class="text-gray-400">
-              支持多种先进的大语言模型，每个 AI 玩家都能进行深度推理和策略分析。
+              支持多种先进的大语言模型，每个智能玩家都能进行深度推理和策略分析。
             </p>
           </div>
           <div class="glass rounded-2xl p-6 card-hover">
@@ -67,7 +67,7 @@
             <div class="text-4xl mb-4">👥</div>
             <h3 class="text-xl font-semibold text-white mb-2">人机混战</h3>
             <p class="text-gray-400">
-              支持真人玩家与 AI 玩家混合对战，体验真实的狼人杀博弈乐趣。
+              支持真人玩家与智能玩家混合对战，体验真实的狼人杀博弈乐趣。
             </p>
           </div>
         </div>
@@ -93,7 +93,7 @@
     <!-- Personalities Section -->
     <section class="py-16 px-4">
       <div class="max-w-6xl mx-auto">
-        <h2 class="text-3xl font-bold text-center mb-12 text-white">AI 人格</h2>
+        <h2 class="text-3xl font-bold text-center mb-12 text-white">智能玩家人格</h2>
         <div class="grid md:grid-cols-4 gap-4">
           <div v-for="p in personalities" :key="p.code" 
                class="glass rounded-xl p-4 card-hover">
@@ -223,7 +223,7 @@ onMounted(async () => {
       stats.value = statsRes.data
     }
   } catch (error) {
-    console.error('Failed to load data:', error)
+    console.error('加载首页数据失败：', error)
     // 保持默认数据
   }
 })

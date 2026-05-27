@@ -1,4 +1,4 @@
-# AI 狼人杀 - Moonlight
+# 月夜狼人杀
 
 一个基于 `FastAPI + Vue 3 + WebSocket` 的 AI 狼人杀项目，支持真人混玩、管理员配置、模型池管理、对局统计和上帝模式。
 

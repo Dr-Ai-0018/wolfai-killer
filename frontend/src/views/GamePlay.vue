@@ -242,6 +242,20 @@
           <p class="text-2xl mb-6" :class="gameState.winner.includes('狼人') ? 'text-red-400' : 'text-green-400'">
             {{ gameState.winner }} 获胜！
           </p>
+
+          <div class="mb-6 rounded-xl border border-game-border bg-slate-950/40 p-4 text-left">
+            <div class="mb-2 text-sm text-slate-400">我的关键事件</div>
+            <div v-if="myPublicRoleEvents.length > 0" class="space-y-2">
+              <div v-for="(event, index) in myPublicRoleEvents" :key="`${index}-${event}`"
+                   class="rounded-lg bg-black/30 px-3 py-2">
+                <div class="text-sm text-slate-200">{{ event }}</div>
+                <div v-if="explainPublicEvent(event)" class="mt-1 text-xs text-slate-400">
+                  {{ explainPublicEvent(event) }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="text-sm text-slate-500">本局没有与你直接相关的公开关键事件</div>
+          </div>
           
           <!-- Afterlife Review Button -->
           <button v-if="!showAfterlife" @click="loadAfterlifeReview"
@@ -333,11 +347,88 @@
               {{ seat }}号：<span :class="result === '狼人' ? 'text-red-400' : 'text-green-400'">{{ result }}</span>
             </div>
           </div>
+          <div v-if="myRole.role === '狐狸'" class="text-sm text-gray-300 space-y-1">
+            <p>能力状态：{{ myRole.fox_power_active ? '✅ 可继续嗅探' : '❌ 已失效' }}</p>
+            <div v-if="myRole.fox_checks && Object.keys(myRole.fox_checks).length > 0">
+              <p class="font-medium mb-1">嗅探结果：</p>
+              <div v-for="(result, seat) in myRole.fox_checks" :key="seat">
+                围绕 {{ seat }}号：<span :class="result === '有狼人' ? 'text-red-400' : 'text-green-400'">{{ result }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="myRole.role === '天使'" class="text-sm text-gray-300 space-y-1">
+            <p>开局胜利条件：{{ myRole.angel_active ? '✅ 仍可触发' : '❌ 已失效' }}</p>
+          </div>
+          <div v-if="myRole.role === '长老'" class="text-sm text-gray-300 space-y-1">
+            <p>剩余生命层数：{{ myRole.elder_lives ?? 0 }}</p>
+          </div>
         </div>
       </div>
 
       <!-- Action Panel -->
       <div class="flex-1 min-h-0 overflow-y-auto p-4">
+        <div class="mb-6 rounded-2xl border border-game-border bg-slate-950/40 p-4">
+          <div class="mb-3 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-white">公开局势</h3>
+            <span class="text-xs text-slate-400">第{{ displayDaySummary.day || gameState.day_count }}天</span>
+          </div>
+
+          <div class="space-y-4 text-sm">
+            <div>
+              <div class="mb-2 text-slate-400">身份跳法</div>
+              <div v-if="claimEntries.length > 0" class="flex flex-wrap gap-2">
+                <div v-for="entry in claimEntries" :key="entry.role"
+                     class="rounded-full border border-violet-700/40 bg-violet-950/40 px-3 py-1 text-violet-200">
+                  {{ entry.role }}: {{ entry.seatsText }}
+                </div>
+              </div>
+              <div v-else class="text-slate-500">暂无公开跳身份</div>
+            </div>
+
+            <div>
+              <div class="mb-2 text-slate-400">票型</div>
+              <div v-if="voteCountEntries.length > 0" class="flex flex-wrap gap-2">
+                <div v-for="entry in voteCountEntries" :key="entry.seat"
+                     class="rounded-full border border-blue-700/40 bg-blue-950/40 px-3 py-1 text-blue-200">
+                  {{ entry.seat }}号 {{ entry.count }}票
+                </div>
+              </div>
+              <div v-else class="text-slate-500">当前还没有公开投票</div>
+            </div>
+
+            <div>
+              <div class="mb-2 text-slate-400">压力榜</div>
+              <div v-if="pressureBoard.length > 0" class="space-y-2">
+                <div v-for="item in pressureBoard" :key="item.seat"
+                     class="flex items-center justify-between rounded-xl bg-slate-900/60 px-3 py-2">
+                  <div class="text-slate-200">
+                    {{ item.seat }}号
+                    <span v-if="item.claimed_role" class="ml-2 text-xs text-violet-300">跳{{ item.claimed_role }}</span>
+                  </div>
+                  <div class="text-xs text-slate-400">
+                    发言点名 {{ item.mentions }} / 票数 {{ item.votes }}
+                  </div>
+                </div>
+              </div>
+              <div v-else class="text-slate-500">暂无压力数据</div>
+            </div>
+
+            <div>
+              <div class="mb-2 text-slate-400">关键事件</div>
+              <div v-if="publicRoleEvents.length > 0" class="space-y-2">
+                <div v-for="(event, index) in publicRoleEvents" :key="`${index}-${event}`"
+                     class="rounded-xl bg-slate-900/60 px-3 py-2">
+                  <div class="text-slate-200">{{ event }}</div>
+                  <div v-if="explainPublicEvent(event)" class="mt-1 text-xs text-slate-400">
+                    {{ explainPublicEvent(event) }}
+                  </div>
+                </div>
+              </div>
+              <div v-else class="text-slate-500">暂无关键角色事件</div>
+            </div>
+          </div>
+        </div>
+
         <h3 class="text-lg font-semibold text-white mb-4">行动面板</h3>
         
         <!-- Waiting for action -->
@@ -377,6 +468,37 @@
             <button v-if="canSkip" @click="submitSkip" 
                     class="w-full mt-2 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white text-sm">
               跳过
+            </button>
+          </div>
+
+          <div v-else-if="pendingAction.action_type === 'scapegoat'">
+            <div class="text-sm text-gray-400 mb-2">
+              请选择下一天仍然保有投票权的玩家（可多选）
+            </div>
+            <div class="space-y-2">
+              <button
+                v-for="seat in pendingAction.options.candidates || []"
+                :key="`scapegoat-${seat}`"
+                @click="toggleAllowedVoter(seat)"
+                :class="[
+                  'w-full rounded-lg border px-3 py-2 text-left transition-colors',
+                  selectedAllowedVoters.includes(seat)
+                    ? 'border-game-accent bg-game-accent/20 text-white'
+                    : 'border-game-border bg-game-dark text-gray-300'
+                ]"
+              >
+                {{ seat }}号
+              </button>
+            </div>
+            <button
+              @click="submitScapegoatChoice"
+              :disabled="selectedAllowedVoters.length === 0"
+              :class="[
+                'w-full mt-3 py-3 rounded-lg text-white font-medium transition-colors',
+                selectedAllowedVoters.length > 0 ? 'bg-game-accent hover:bg-game-accent-light' : 'bg-gray-600 cursor-not-allowed'
+              ]"
+            >
+              确认名单
             </button>
           </div>
           
@@ -440,6 +562,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { gameApi, GameWebSocket, getAvatarUrl } from '@/api'
+import { explainPublicEvent, extractPublicRoleEvents } from '@/gameReview'
 
 const route = useRoute()
 const router = useRouter()
@@ -457,6 +580,14 @@ const gameState = ref({
   human_action_options: {},
   current_action_role: null,
   current_action_message: null,
+  day_summary: {
+    day: 0,
+    phase: 'waiting',
+    claims: {},
+    vote_map: {},
+    vote_counts: {},
+    pressure_board: [],
+  },
 })
 const players = ref([])
 const gameLogs = ref([])
@@ -468,6 +599,7 @@ const wsConnected = ref(false)
 
 // Action state
 const selectedTarget = ref(null)
+const selectedAllowedVoters = ref([])
 const speechInput = ref('')
 
 // 上帝模式
@@ -508,7 +640,7 @@ const phaseText = computed(() => {
 const needsTargetSelection = computed(() => {
   if (!pendingAction.value) return false
   const type = pendingAction.value.action_type
-  return ['guard', 'seer', 'wolf', 'vote', 'witch_poison'].includes(type)
+  return ['guard', 'seer', 'fox', 'wolf', 'vote', 'witch_poison'].includes(type)
 })
 
 const canSkip = computed(() => {
@@ -522,6 +654,42 @@ const displayLogs = computed(() => {
     return godModeLogs.value
   }
   return gameLogs.value
+})
+
+const displayDaySummary = computed(() => (
+  gameState.value.day_summary || {
+    day: gameState.value.day_count,
+    phase: gameState.value.phase,
+    claims: {},
+    vote_map: {},
+    vote_counts: {},
+    pressure_board: [],
+  }
+))
+
+const claimEntries = computed(() => {
+  const claims = displayDaySummary.value.claims || {}
+  return Object.entries(claims)
+    .filter(([, seats]) => Array.isArray(seats) && seats.length > 0)
+    .map(([role, seats]) => ({
+      role,
+      seatsText: seats.map((seat) => `${seat}号`).join('、'),
+    }))
+})
+
+const voteCountEntries = computed(() => {
+  const counts = displayDaySummary.value.vote_counts || {}
+  return Object.entries(counts)
+    .map(([seat, count]) => ({ seat: Number(seat), count: Number(count) }))
+    .sort((a, b) => b.count - a.count || a.seat - b.seat)
+})
+
+const pressureBoard = computed(() => displayDaySummary.value.pressure_board || [])
+const publicRoleEvents = computed(() => extractPublicRoleEvents(displayLogs.value, { limit: 6 }))
+const myPublicRoleEvents = computed(() => {
+  if (!mySeat.value) return []
+  const seatTag = `${mySeat.value}号`
+  return publicRoleEvents.value.filter((event) => event.includes(seatTag))
 })
 
 // Methods
@@ -586,6 +754,18 @@ const getVoteLineCoords = (voter, target) => {
 }
 
 const parseVotesFromLogs = () => {
+  const summaryVoteMap = displayDaySummary.value.vote_map || {}
+  const summaryVoteCounts = displayDaySummary.value.vote_counts || {}
+  if (Object.keys(summaryVoteMap).length > 0 || Object.keys(summaryVoteCounts).length > 0) {
+    currentVotes.value = Object.fromEntries(
+      Object.entries(summaryVoteMap).map(([voter, target]) => [Number(voter), Number(target)])
+    )
+    voteCounts.value = Object.fromEntries(
+      Object.entries(summaryVoteCounts).map(([target, count]) => [Number(target), Number(count)])
+    )
+    return
+  }
+
   // Parse votes from current day's logs
   const votes = {}
   const counts = {}
@@ -639,6 +819,17 @@ const getRoleIcon = (role) => {
     '女巫': '🧙‍♀️',
     '猎人': '🏹',
     '守卫': '🛡️',
+    '狐狸': '🦊',
+    '天使': '😇',
+    '替罪羊': '🐐',
+    '丘比特': '💘',
+    '白痴': '🤪',
+    '长老': '👴',
+    '圣徒': '⛪',
+    '野孩子': '🧒',
+    '共济会': '🤝',
+    '被诅咒者': '🕯️',
+    '受祝福者': '✨',
   }
   return icons[role] || '❓'
 }
@@ -650,6 +841,11 @@ const getRoleAnnouncementIcon = (role) => {
     '预言家': '🔮',
     '女巫': '🧙‍♀️',
     '猎人': '🏹',
+    '狐狸': '🦊',
+    '天使': '😇',
+    '替罪羊': '🐐',
+    '丘比特': '💘',
+    '野孩子': '🧒',
   }
   return icons[role] || '🌙'
 }
@@ -662,7 +858,7 @@ const loadAfterlifeReview = async () => {
     }
     showAfterlife.value = true
   } catch (error) {
-    console.error('Failed to load afterlife review:', error)
+    console.error('加载冥界复盘失败：', error)
     showAfterlife.value = true
   }
 }
@@ -699,6 +895,23 @@ const submitTargetAction = () => {
   selectedTarget.value = null
 }
 
+const toggleAllowedVoter = (seat) => {
+  if (!pendingAction.value || pendingAction.value.action_type !== 'scapegoat') return
+  const candidates = pendingAction.value.options?.candidates || []
+  if (!candidates.includes(seat)) return
+  if (selectedAllowedVoters.value.includes(seat)) {
+    selectedAllowedVoters.value = selectedAllowedVoters.value.filter((item) => item !== seat)
+  } else {
+    selectedAllowedVoters.value = [...selectedAllowedVoters.value, seat]
+  }
+}
+
+const submitScapegoatChoice = () => {
+  if (selectedAllowedVoters.value.length === 0) return
+  gameWs?.sendAction({ allowed_voters: selectedAllowedVoters.value })
+  selectedAllowedVoters.value = []
+}
+
 const submitSkip = () => {
   gameWs?.sendAction({ target: null })
   selectedTarget.value = null
@@ -717,7 +930,7 @@ const togglePause = async () => {
     }
     gameState.value.paused = !gameState.value.paused
   } catch (error) {
-    console.error('Failed to toggle pause:', error)
+    console.error('切换暂停状态失败：', error)
   }
 }
 
@@ -725,7 +938,7 @@ const startGame = async () => {
   try {
     await gameApi.start(gameId.value)
   } catch (error) {
-    console.error('Failed to start game:', error)
+    console.error('开始游戏失败：', error)
   }
 }
 
@@ -754,7 +967,7 @@ const verifyGodModePassword = async () => {
       alert(res.data.message || '密码错误')
     }
   } catch (error) {
-    console.error('Failed to verify god mode:', error)
+    console.error('验证上帝模式失败：', error)
     alert('验证失败')
   }
 }
@@ -769,7 +982,7 @@ const loadGodModeData = async () => {
     godModePlayers.value = playersRes.data || []
     scrollToBottom()
   } catch (error) {
-    console.error('Failed to load god mode data:', error)
+    console.error('加载上帝模式数据失败：', error)
   }
 }
 
@@ -800,6 +1013,16 @@ const handleWsConnected = (data) => {
       waiting_for_human: data.game_state.waiting_for_human,
       human_action_type: data.game_state.human_action_type,
       human_action_options: data.game_state.human_action_options,
+      current_action_role: data.game_state.current_action_role,
+      current_action_message: data.game_state.current_action_message,
+      day_summary: data.game_state.day_summary || {
+        day: data.game_state.day_count,
+        phase: data.game_state.phase,
+        claims: {},
+        vote_map: {},
+        vote_counts: {},
+        pressure_board: [],
+      },
     }
     players.value = data.game_state.players
     gameLogs.value = data.game_state.logs || []
@@ -833,6 +1056,14 @@ const handleWsState = (data) => {
     human_action_options: data.human_action_options,
     current_action_role: data.current_action_role,
     current_action_message: data.current_action_message,
+    day_summary: data.day_summary || {
+      day: data.day_count,
+      phase: data.phase,
+      claims: {},
+      vote_map: {},
+      vote_counts: {},
+      pressure_board: [],
+    },
   }
   players.value = data.players
   
@@ -876,15 +1107,18 @@ const handleWsState = (data) => {
       options: data.human_action_options,
       message: data.human_action_options?.message || '请行动',
     }
+    selectedAllowedVoters.value = []
     timer.value = data.human_action_options?.timeout || 120
   } else {
     pendingAction.value = null
+    selectedAllowedVoters.value = []
   }
 }
 
 const handleWsActionRequired = (data) => {
   if (data.seat === mySeat.value) {
     pendingAction.value = data
+    selectedAllowedVoters.value = []
     timer.value = data.timeout || 120
   }
 }
@@ -899,6 +1133,18 @@ const handleWsSeerResult = (data) => {
       myRole.value.seer_results = {}
     }
     myRole.value.seer_results[data.target] = data.result
+  }
+}
+
+const handleWsFoxResult = (data) => {
+  if (myRole.value) {
+    if (!myRole.value.fox_checks) {
+      myRole.value.fox_checks = {}
+    }
+    myRole.value.fox_checks[data.target] = data.result
+    if (data.result === '没有狼人') {
+      myRole.value.fox_power_active = false
+    }
   }
 }
 
@@ -936,7 +1182,7 @@ onMounted(async () => {
       myRole.value = viewRes.data
     }
   } catch (error) {
-    console.error('Failed to load initial state:', error)
+    console.error('加载初始状态失败：', error)
   }
   
   // Connect WebSocket
@@ -947,6 +1193,7 @@ onMounted(async () => {
       onActionRequired: handleWsActionRequired,
       onRole: handleWsRole,
       onSeerResult: handleWsSeerResult,
+      onFoxResult: handleWsFoxResult,
       onDisconnect: () => { wsConnected.value = false },
     })
     gameWs.connect()
