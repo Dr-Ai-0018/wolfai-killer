@@ -39,6 +39,7 @@ from game_day_ai import (
     choose_vote_fallback,
     parse_ai_vote_response,
 )
+from game_end import build_end_game_logs, build_game_record
 from game_night_ai import (
     build_guard_messages,
     build_seer_messages,
@@ -1437,14 +1438,9 @@ class GameEngine:
         """End the game"""
         self.phase = GamePhase.ENDED
         self.winner = winner
-        self.add_log("end", f"游戏结束！{winner}获胜！")
-        
-        # Reveal all roles
-        roles_info = []
-        for seat in sorted(self.players.keys()):
-            p = self.players[seat]
-            roles_info.append(f"{seat}号：{p.role.value}")
-        self.add_log("reveal", "身份揭晓：" + "，".join(roles_info))
+        end_log, reveal_log = build_end_game_logs(self.players, winner)
+        self.add_log(end_log["type"], end_log["content"])
+        self.add_log(reveal_log["type"], reveal_log["content"])
         
         await self.emit_state()
         
@@ -1463,60 +1459,17 @@ class GameEngine:
             from game_stats import stats_manager
             
             end_time = datetime.now()
-            duration = 0
-            if self.start_time:
-                duration = int((end_time - self.start_time).total_seconds())
-            
-            # 构建玩家信息
-            players_info = []
-            for seat, p in self.players.items():
-                players_info.append({
-                    "seat": seat,
-                    "role": p.role.value,
-                    "camp": p.camp.value,
-                    "is_human": p.is_human,
-                    "alive": p.alive,
-                    "model_name": p.model_name,
-                    "personality_name": p.personality.name if p.personality else None,
-                })
-            
-            public_logs = [log for log in self.logs if log.get("is_public", True)]
-            private_logs = [log for log in self.logs if not log.get("is_public", True)]
-            log_counts: Dict[str, int] = {}
-            for log in self.logs:
-                log_type = str(log.get("type") or "unknown")
-                log_counts[log_type] = log_counts.get(log_type, 0) + 1
-
-            llm_traces = [log for log in private_logs if log.get("type") == "llm_trace"]
-            total_input_tokens = sum(int((log.get("meta") or {}).get("input_tokens") or 0) for log in llm_traces)
-            total_cached_tokens = sum(int((log.get("meta") or {}).get("cached_tokens") or 0) for log in llm_traces)
-            total_output_tokens = sum(int((log.get("meta") or {}).get("output_tokens") or 0) for log in llm_traces)
-            
-            # 构建游戏记录
-            game_record = {
-                "game_id": self.game_id,
-                "start_time": self.start_time.isoformat() if self.start_time else None,
-                "end_time": end_time.isoformat(),
-                "duration": duration,
-                "total_players": len(self.players),
-                "num_wolves": len([p for p in self.players.values() if p.camp == Camp.WOLF]),
-                "num_humans": len([p for p in self.players.values() if p.is_human]),
-                "winner_camp": winner,
-                "total_rounds": self.day_count,
-                "players": players_info,
-                "logs": public_logs,
-                "public_logs": public_logs,
-                "private_logs": private_logs,
-                "day_summary": self.build_day_summary(),
-                "log_counts": log_counts,
-                "llm_usage_summary": {
-                    "request_count": len(llm_traces),
-                    "input_tokens": total_input_tokens,
-                    "cached_tokens": total_cached_tokens,
-                    "output_tokens": total_output_tokens,
-                },
-                "phantom_actions": list(self.phantom_actions),
-            }
+            game_record = build_game_record(
+                game_id=self.game_id,
+                start_time=self.start_time,
+                end_time=end_time,
+                players=self.players,
+                winner=winner,
+                day_count=self.day_count,
+                logs=self.logs,
+                day_summary=self.build_day_summary(),
+                phantom_actions=self.phantom_actions,
+            )
             
             stats_manager.record_game(game_record)
             print(f"Game stats recorded: {self.game_id}")
