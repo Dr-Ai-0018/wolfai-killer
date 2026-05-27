@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import random
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
+
+from game_catalog import Camp, Role
 
 
 DAY_SPEECH_INSTRUCTION = """现在是白天发言阶段，请你作为 {seat} 号玩家进行一段简短发言（3~6 句），
@@ -107,3 +109,134 @@ def build_llm_messages(system_prompt: str, user_prompt: str) -> List[Dict[str, A
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
+
+
+def build_day_vote_scores(
+    player: Any,
+    candidates: List[int],
+    current_votes: Dict[int, int],
+    claims: Dict[str, List[int]],
+    logs: Iterable[Dict[str, Any]],
+    day_count: int,
+    total_players: int,
+    get_neighbor_triplet: Callable[[int], List[int]],
+    alive_wolf_seats: Iterable[int],
+) -> Dict[int, int]:
+    """计算白天投票启发式得分，降低低信息轮次的盲目跟票。"""
+    scores = {candidate: 0 for candidate in candidates}
+    protected_claimants = {
+        seat
+        for role_name, seats in claims.items()
+        if len(seats) == 1 and role_name in {Role.SEER.value, Role.WITCH.value, Role.GUARD.value, Role.HUNTER.value}
+        for seat in seats
+    }
+
+    for target in current_votes.values():
+        if target in scores:
+            scores[target] += 1
+    current_vote_counts: Dict[int, int] = {}
+    for target in current_votes.values():
+        current_vote_counts[target] = current_vote_counts.get(target, 0) + 1
+
+    today_speeches = [
+        log for log in logs
+        if log.get("is_public") and log.get("type") == "speech" and log.get("day") == day_count
+    ]
+    suspicion_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
+    defense_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
+    role_conflict_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
+    early_pressure_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
+    anti_dogpile_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
+    for log in today_speeches:
+        speaker = int(log.get("seat") or 0)
+        content = str(log.get("content") or "")
+        meta = log.get("meta") or {}
+        for candidate in candidates:
+            if f"{candidate}号" not in content:
+                continue
+            scores[candidate] += 1
+            if any(keyword in content for keyword in ["像狼", "可疑", "问题最大", "压力位", "投"]):
+                scores[candidate] += 2
+                suspicion_speakers[candidate].add(speaker)
+                if speaker != candidate and any(keyword in content for keyword in ["压力位", "追问", "优先", "先给"]):
+                    early_pressure_speakers[candidate].add(speaker)
+            if any(keyword in content for keyword in ["好人", "暂不投", "先不出", "站边"]):
+                scores[candidate] -= 1
+                defense_speakers[candidate].add(speaker)
+            if any(keyword in content for keyword in ["别空跟票", "别跟票", "独立判断", "别无脑冲", "别急着", "先听", "先看"]):
+                anti_dogpile_speakers[candidate].add(speaker)
+            if any(keyword in content for keyword in ["对跳", "假预言家", "悍跳", "穿衣服", "不信这个预言家", "不信这个女巫", "不信这个守卫", "不信这个猎人"]):
+                role_conflict_speakers[candidate].add(speaker)
+        if speaker in scores and meta.get("claimed_role"):
+            scores[speaker] -= 2
+
+    if player.role == Role.SEER:
+        for checked_seat, result in player.seer_results.items():
+            if checked_seat in scores and result == "狼人":
+                scores[checked_seat] += 100
+            elif checked_seat in scores and result == "好人":
+                scores[checked_seat] -= 100
+    if player.role == Role.FOX:
+        for checked_seat, result in player.fox_checks.items():
+            if result == "没有狼人":
+                for seat in get_neighbor_triplet(checked_seat):
+                    if seat in scores:
+                        scores[seat] -= 25
+
+    for claimant in protected_claimants:
+        if claimant in scores and player.camp == Camp.GOOD:
+            scores[claimant] -= 8
+
+    if player.camp == Camp.GOOD:
+        for candidate in candidates:
+            if candidate in protected_claimants and not role_conflict_speakers[candidate]:
+                scores[candidate] -= 8
+
+            if (
+                day_count <= 2
+                and len(suspicion_speakers[candidate]) <= 2
+                and len(defense_speakers[candidate]) >= 1
+                and current_vote_counts.get(candidate, 0) == 0
+            ):
+                scores[candidate] -= 3
+
+            vote_pressure = current_vote_counts.get(candidate, 0)
+            if vote_pressure >= 2 and len(suspicion_speakers[candidate]) <= 1:
+                scores[candidate] -= 4
+
+            if total_players <= 5 and day_count <= 2 and candidate in scores:
+                callers_targeting_others = {
+                    speaker for targeted_seat, speakers in early_pressure_speakers.items()
+                    if targeted_seat != candidate
+                    for speaker in speakers
+                }
+                if (
+                    callers_targeting_others
+                    and candidate in callers_targeting_others
+                    and len(suspicion_speakers[candidate] - {candidate}) <= 1
+                    and not role_conflict_speakers[candidate]
+                ):
+                    scores[candidate] -= 4
+
+            if (
+                total_players <= 5
+                and day_count <= 2
+                and current_vote_counts.get(candidate, 0) == 0
+                and len(anti_dogpile_speakers[candidate]) >= 1
+                and len(suspicion_speakers[candidate] - anti_dogpile_speakers[candidate]) == 0
+            ):
+                scores[candidate] -= 2
+
+            if (
+                candidate in claims.get(Role.SEER.value, [])
+                and len(claims.get(Role.SEER.value, [])) == 1
+                and not role_conflict_speakers[candidate]
+            ):
+                scores[candidate] -= 10
+
+    if player.camp == Camp.WOLF:
+        for teammate in set(alive_wolf_seats):
+            if teammate in scores:
+                scores[teammate] -= 100
+
+    return scores

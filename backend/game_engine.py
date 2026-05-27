@@ -32,6 +32,7 @@ from game_ai_context import (
 from game_day import build_human_speech_options, build_speech_log, resolve_human_speech
 from game_day_ai import (
     build_day_speech_user_prompt,
+    build_day_vote_scores,
     build_day_vote_user_prompt,
     build_llm_messages,
     choose_speech_fallback,
@@ -306,137 +307,17 @@ class GameEngine:
 
     def build_vote_scores(self, player: Player, candidates: List[int], current_votes: Dict[int, int]) -> Dict[int, int]:
         """Heuristic score for day voting to reduce blind dogpiles."""
-        scores = {candidate: 0 for candidate in candidates}
-        claims = self.build_public_claim_summary()
-        protected_claimants = {
-            seat
-            for role_name, seats in claims.items()
-            if len(seats) == 1 and role_name in {Role.SEER.value, Role.WITCH.value, Role.GUARD.value, Role.HUNTER.value}
-            for seat in seats
-        }
-
-        for target in current_votes.values():
-            if target in scores:
-                scores[target] += 1
-        current_vote_counts: Dict[int, int] = {}
-        for target in current_votes.values():
-            current_vote_counts[target] = current_vote_counts.get(target, 0) + 1
-
-        today_speeches = [
-            log for log in self.logs
-            if log.get("is_public") and log.get("type") == "speech" and log.get("day") == self.day_count
-        ]
-        suspicion_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
-        defense_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
-        role_conflict_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
-        early_pressure_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
-        anti_dogpile_speakers: Dict[int, set[int]] = {candidate: set() for candidate in candidates}
-        for log in today_speeches:
-            speaker = int(log.get("seat") or 0)
-            content = str(log.get("content") or "")
-            meta = log.get("meta") or {}
-            for candidate in candidates:
-                if f"{candidate}号" not in content:
-                    continue
-                scores[candidate] += 1
-                if any(keyword in content for keyword in ["像狼", "可疑", "问题最大", "压力位", "投"]):
-                    scores[candidate] += 2
-                    suspicion_speakers[candidate].add(speaker)
-                    if speaker != candidate and any(keyword in content for keyword in ["压力位", "追问", "优先", "先给"]):
-                        early_pressure_speakers[candidate].add(speaker)
-                if any(keyword in content for keyword in ["好人", "暂不投", "先不出", "站边"]):
-                    scores[candidate] -= 1
-                    defense_speakers[candidate].add(speaker)
-                if any(keyword in content for keyword in ["别空跟票", "别跟票", "独立判断", "别无脑冲", "别急着", "先听", "先看"]):
-                    anti_dogpile_speakers[candidate].add(speaker)
-                if any(keyword in content for keyword in ["对跳", "假预言家", "悍跳", "穿衣服", "不信这个预言家", "不信这个女巫", "不信这个守卫", "不信这个猎人"]):
-                    role_conflict_speakers[candidate].add(speaker)
-            if speaker in scores and meta.get("claimed_role"):
-                scores[speaker] -= 2
-
-        if player.role == Role.SEER:
-            for checked_seat, result in player.seer_results.items():
-                if checked_seat in scores and result == "狼人":
-                    scores[checked_seat] += 100
-                elif checked_seat in scores and result == "好人":
-                    scores[checked_seat] -= 100
-        if player.role == Role.FOX:
-            for checked_seat, result in player.fox_checks.items():
-                if result == "没有狼人":
-                    for seat in self.get_neighbor_triplet(checked_seat):
-                        if seat in scores:
-                            scores[seat] -= 25
-
-        for claimant in protected_claimants:
-            if claimant in scores and player.camp == Camp.GOOD:
-                scores[claimant] -= 8
-
-        if player.camp == Camp.GOOD:
-            for candidate in candidates:
-                if candidate in protected_claimants and not role_conflict_speakers[candidate]:
-                    # A sole public power-role claim should be very hard to execute without a real contradiction.
-                    scores[candidate] -= 8
-
-                # Reduce first-day / low-evidence dogpiles on early pressure targets.
-                if (
-                    self.day_count <= 2
-                    and len(suspicion_speakers[candidate]) <= 2
-                    and len(defense_speakers[candidate]) >= 1
-                    and current_vote_counts.get(candidate, 0) == 0
-                ):
-                    scores[candidate] -= 3
-
-                # If a target is mostly being pushed by vote momentum rather than multiple independent speeches,
-                # good camp should resist piling on.
-                vote_pressure = current_vote_counts.get(candidate, 0)
-                if vote_pressure >= 2 and len(suspicion_speakers[candidate]) <= 1:
-                    scores[candidate] -= 4
-
-                # In small lobbies, an early pressure caller should not be auto-executed
-                # unless multiple independent speakers actually articulate why that caller is wolfy.
-                if (
-                    self.total_players <= 5
-                    and self.day_count <= 2
-                    and candidate in scores
-                ):
-                    callers_targeting_others = {
-                        speaker for targeted_seat, speakers in early_pressure_speakers.items()
-                        if targeted_seat != candidate
-                        for speaker in speakers
-                    }
-                    if (
-                        callers_targeting_others
-                        and candidate in callers_targeting_others
-                        and len(suspicion_speakers[candidate] - {candidate}) <= 1
-                        and not role_conflict_speakers[candidate]
-                    ):
-                        scores[candidate] -= 4
-
-                # Do not over-credit a counter-pusher merely for sounding like
-                # they value independent judgment or anti-dogpile process.
-                if (
-                    self.total_players <= 5
-                    and self.day_count <= 2
-                    and current_vote_counts.get(candidate, 0) == 0
-                    and len(anti_dogpile_speakers[candidate]) >= 1
-                    and len(suspicion_speakers[candidate] - anti_dogpile_speakers[candidate]) == 0
-                ):
-                    scores[candidate] -= 2
-
-                # Do not execute a claimed seer lightly when they produced at least one public check and there is no counterclaim.
-                if (
-                    candidate in claims.get(Role.SEER.value, [])
-                    and len(claims.get(Role.SEER.value, [])) == 1
-                    and not role_conflict_speakers[candidate]
-                ):
-                    scores[candidate] -= 10
-
-        if player.camp == Camp.WOLF:
-            teammates = {ally.seat for ally in self.get_alive_wolves()}
-            for teammate in teammates:
-                if teammate in scores:
-                    scores[teammate] -= 100
-        return scores
+        return build_day_vote_scores(
+            player=player,
+            candidates=candidates,
+            current_votes=current_votes,
+            claims=self.build_public_claim_summary(),
+            logs=self.logs,
+            day_count=self.day_count,
+            total_players=self.total_players,
+            get_neighbor_triplet=self.get_neighbor_triplet,
+            alive_wolf_seats=[ally.seat for ally in self.get_alive_wolves()],
+        )
 
     def build_day_summary(self) -> Dict[str, Any]:
         return summarize_day_state(

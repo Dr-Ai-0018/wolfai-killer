@@ -8,8 +8,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import game_day_ai
+from game_catalog import Camp, Role
+from game_engine import Player
 from game_day_ai import (
     build_day_speech_user_prompt,
+    build_day_vote_scores,
     build_day_vote_user_prompt,
     build_llm_messages,
     choose_speech_fallback,
@@ -73,6 +76,74 @@ class GameDayAiTests(unittest.TestCase):
             game_day_ai.random.choice = original_choice
 
         self.assertEqual(target, 2)
+
+    def test_build_day_vote_scores_protects_single_claimed_power_role_for_good_camp(self):
+        player = Player(seat=1, role=Role.VILLAGER, camp=Camp.GOOD, is_human=False)
+        logs = [
+            {
+                "type": "speech",
+                "seat": 2,
+                "content": "我是2号，身份是预言家。今天先听发言，先不出2号。",
+                "is_public": True,
+                "day": 1,
+                "meta": {"claimed_role": "预言家"},
+            }
+        ]
+
+        scores = build_day_vote_scores(
+            player=player,
+            candidates=[2, 3],
+            current_votes={},
+            claims={"预言家": [2]},
+            logs=logs,
+            day_count=1,
+            total_players=6,
+            get_neighbor_triplet=lambda seat: [seat - 1, seat, seat + 1],
+            alive_wolf_seats=[],
+        )
+
+        self.assertLess(scores[2], scores[3])
+
+    def test_build_day_vote_scores_seer_check_overrides_to_wolf_target(self):
+        player = Player(
+            seat=1,
+            role=Role.SEER,
+            camp=Camp.GOOD,
+            is_human=False,
+            seer_results={3: "狼人", 4: "好人"},
+        )
+
+        scores = build_day_vote_scores(
+            player=player,
+            candidates=[2, 3, 4],
+            current_votes={},
+            claims={},
+            logs=[],
+            day_count=2,
+            total_players=6,
+            get_neighbor_triplet=lambda seat: [seat - 1, seat, seat + 1],
+            alive_wolf_seats=[],
+        )
+
+        self.assertGreater(scores[3], scores[2])
+        self.assertLess(scores[4], scores[2])
+
+    def test_build_day_vote_scores_wolf_avoids_alive_teammates(self):
+        player = Player(seat=1, role=Role.WOLF, camp=Camp.WOLF, is_human=False)
+
+        scores = build_day_vote_scores(
+            player=player,
+            candidates=[2, 3],
+            current_votes={},
+            claims={},
+            logs=[],
+            day_count=1,
+            total_players=6,
+            get_neighbor_triplet=lambda seat: [seat - 1, seat, seat + 1],
+            alive_wolf_seats=[2],
+        )
+
+        self.assertLess(scores[2], scores[3])
 
 
 if __name__ == "__main__":
