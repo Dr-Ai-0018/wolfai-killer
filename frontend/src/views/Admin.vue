@@ -297,6 +297,13 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { adminApi } from '@/api'
+import {
+  formatTokenExpiry,
+  mergeSelectedModels,
+  normalizeAdminConfig,
+  resolveApiRequestConfig,
+  showTimedToast,
+} from '@/adminPanel'
 
 // Auth State
 const isAuthenticated = ref(false)
@@ -336,23 +343,9 @@ const toast = reactive({
 })
 
 // Methods
-const showToast = (message, type = 'info') => {
-  toast.message = message
-  toast.type = type
-  toast.show = true
-  setTimeout(() => { toast.show = false }, 3000)
-}
+const showToast = (message, type = 'info') => showTimedToast(toast, message, type)
 
-const formatExpiry = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', { 
-    month: 'short', 
-    day: 'numeric', 
-    hour: '2-digit', 
-    minute: '2-digit' 
-  })
-}
+const formatExpiry = (dateStr) => formatTokenExpiry(dateStr)
 
 const checkAdminStatus = async () => {
   try {
@@ -409,10 +402,7 @@ const handleLogout = async () => {
 const loadConfig = async () => {
   try {
     const res = await adminApi.getConfig()
-    currentConfig.value = {
-      ...res.data,
-      model_ids: res.data.model_ids || res.data.models || []
-    }
+    currentConfig.value = normalizeAdminConfig(res.data)
     config.apiUrl = res.data.api_url || ''
   } catch (error) {
     if (error.response?.status === 401) {
@@ -451,8 +441,7 @@ const saveApiConfig = async () => {
 const testConnection = async () => {
   testing.value = true
   try {
-    const apiUrl = config.apiUrl || currentConfig.value.api_url
-    const apiKey = config.apiKey || 'use_existing'
+    const { apiUrl, apiKey } = resolveApiRequestConfig(config, currentConfig.value)
     
     if (!apiUrl) {
       showToast('请先配置API地址', 'error')
@@ -480,8 +469,7 @@ const testConnection = async () => {
 const fetchRemoteModels = async () => {
   fetching.value = true
   try {
-    const apiUrl = config.apiUrl || currentConfig.value.api_url
-    const apiKey = config.apiKey || 'use_existing'
+    const { apiUrl, apiKey } = resolveApiRequestConfig(config, currentConfig.value)
     
     if (!apiUrl) {
       showToast('请先配置API地址', 'error')
@@ -514,15 +502,14 @@ const selectAllModels = () => {
 }
 
 const addSelectedModels = async () => {
-  const existingModels = new Set(currentConfig.value.model_ids || [])
-  const newModels = selectedFetchedModels.value.filter(m => !existingModels.has(m))
+  const result = mergeSelectedModels(currentConfig.value.model_ids, selectedFetchedModels.value)
   
-  if (newModels.length === 0) {
+  if (result.added.length === 0) {
     showToast('所选模型已存在', 'info')
     return
   }
   
-  currentConfig.value.model_ids = [...(currentConfig.value.model_ids || []), ...newModels]
+  currentConfig.value.model_ids = result.merged
   await saveModels()
   selectedFetchedModels.value = []
 }
