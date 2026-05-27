@@ -111,6 +111,7 @@ from game_special_roles import (
     parse_wild_child_target_response,
 )
 from game_setup import assign_mason_peers, build_player_specs
+from game_vote_flow import collect_vote_round, resolve_vote_outcome
 
 
 class GamePhase(Enum):
@@ -1296,75 +1297,10 @@ class GameEngine:
         self.phase = GamePhase.VOTE
         self.add_log("phase", "开始投票环节")
         await self.emit_state()
-        
-        candidates = self.get_alive_seats()
-        votes: Dict[int, int] = {}  # voter -> target
-        last_voter_by_target: Dict[int, int] = {}
-        apply_vote_rights(
-            self.players,
-            self.get_alive_seats(),
-            self.restricted_voters_next_day,
-        )
-        if self.restricted_voters_next_day is not None:
-            self.restricted_voters_next_day = None
-        
-        for seat in sorted(self.get_alive_seats()):
-            player = self.players[seat]
-            if not player.can_vote:
-                payload = build_skipped_vote_log(seat)
-                self.add_log(payload["type"], payload["content"], seat=payload["seat"], meta=payload["meta"])
-                await self.emit_state()
-                await asyncio.sleep(0.3)
-                continue
-            valid_targets = build_valid_vote_targets(candidates, seat)
-            
-            if player.is_human:
-                response = await self.wait_for_human(seat, "vote", build_human_vote_options(valid_targets, votes))
-                target = response.get("target") if response else None
-            else:
-                # AI投票 - 使用LLM决策，传入当前投票情况
-                target = await self.generate_ai_vote(player, valid_targets, votes)
-            
-            if target and target in valid_targets:
-                record_vote_choice(votes, last_voter_by_target, seat, target)
-                payload = build_cast_vote_log(seat, target)
-                self.add_log(payload["type"], payload["content"], seat=payload["seat"], meta=payload["meta"])
-                # 每次投票后立即广播，让后面的玩家能看到
-                await self.emit_state()
-                await asyncio.sleep(0.3)  # 短暂延迟，让前端有时间显示
-        
-        resolution = resolve_vote_round(votes)
 
-        if resolution:
-            if not resolution.is_tie:
-                eliminated = resolution.eliminated_seat
-                assert eliminated is not None
-                eliminated_chain = await self.eliminate_player(
-                    eliminated,
-                    "vote",
-                    context={"last_voter": last_voter_by_target.get(eliminated)},
-                )
-                if eliminated_chain:
-                    payload = build_vote_eliminate_log(resolution, eliminated_chain)
-                else:
-                    payload = build_vote_result_log(resolution)
-                self.add_log(payload["type"], payload["content"], meta=payload["meta"])
-            else:
-                scapegoat = self.get_player_by_role(Role.SCAPEGOAT)
-                if scapegoat:
-                    scapegoat_seat = scapegoat.seat
-                    eliminated_chain = await self.eliminate_player(
-                        scapegoat_seat,
-                        "scapegoat",
-                        allow_hunter=False,
-                        context={"tie_targets": list(resolution.top_targets)},
-                    )
-                    await self.scapegoat_choose_voters(scapegoat_seat)
-                    payload = build_scapegoat_tie_log(resolution, scapegoat_seat, eliminated_chain)
-                else:
-                    payload = build_vote_tie_log(resolution)
-                self.add_log(payload["type"], payload["content"], meta=payload["meta"])
-        
+        votes, last_voter_by_target = await collect_vote_round(self)
+        await resolve_vote_outcome(self, votes, last_voter_by_target)
+
         await self.emit_state()
 
     async def hunter_action(self, hunter_seat: int):
