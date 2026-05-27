@@ -13,8 +13,16 @@ from game_engine import Player
 from game_special_roles import (
     apply_cupid_pair,
     apply_wild_child_idol,
+    build_cupid_action_log,
+    build_cupid_phantom_decision,
+    build_lover_info_payload,
+    build_wild_child_action_log,
+    build_wild_child_info_payload,
+    build_wild_child_phantom_decision,
     choose_cupid_pair,
     choose_wild_child_idol,
+    parse_cupid_pair_response,
+    parse_wild_child_target_response,
 )
 
 
@@ -49,3 +57,25 @@ class GameSpecialRolesTests(unittest.TestCase):
 
         self.assertTrue(apply_wild_child_idol(players[4], 2))
         self.assertEqual(players[4].idol, 2)
+
+    def test_parse_helpers_and_payload_builders(self):
+        self.assertEqual(parse_cupid_pair_response({"pair": ["1", 3, 9]}, [1, 2, 3]), [1, 3])
+        self.assertIsNone(parse_cupid_pair_response({"pair": "bad"}, [1, 2, 3]))
+        self.assertEqual(parse_wild_child_target_response({"target": "2"}, [2, 3, 4]), 2)
+        self.assertIsNone(parse_wild_child_target_response({"target": "9"}, [2, 3, 4]))
+
+        self.assertEqual(build_cupid_phantom_decision([2, 3]), "连接2号与3号")
+        self.assertEqual(build_cupid_phantom_decision([]), "跳过")
+        self.assertEqual(build_lover_info_payload(3), {"lover": 3})
+
+        cupid_payload = build_cupid_action_log(1, [2, 3])
+        self.assertEqual(cupid_payload["type"], "cupid_action")
+        self.assertEqual(cupid_payload["meta"]["pair"], [2, 3])
+
+        self.assertEqual(build_wild_child_phantom_decision(4), "认4号为榜样")
+        self.assertEqual(build_wild_child_phantom_decision(None), "跳过")
+        self.assertEqual(build_wild_child_info_payload(4), {"idol": 4})
+
+        wild_payload = build_wild_child_action_log(5, 4)
+        self.assertEqual(wild_payload["type"], "wild_child_action")
+        self.assertEqual(wild_payload["meta"]["idol"], 4)

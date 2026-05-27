@@ -80,8 +80,16 @@ from game_phantom import pick_random_candidate, run_phantom_role_action
 from game_special_roles import (
     apply_cupid_pair,
     apply_wild_child_idol,
+    build_cupid_action_log,
+    build_cupid_phantom_decision,
+    build_lover_info_payload,
+    build_wild_child_action_log,
+    build_wild_child_info_payload,
+    build_wild_child_phantom_decision,
     choose_cupid_pair,
     choose_wild_child_idol,
+    parse_cupid_pair_response,
+    parse_wild_child_target_response,
 )
 from game_setup import assign_mason_peers, build_player_specs
 
@@ -901,15 +909,13 @@ class GameEngine:
                     "candidates": candidates,
                     "message": "请选择两名玩家成为情侣",
                 })
-                raw_pair = response.get("pair") if response else None
-                if isinstance(raw_pair, list):
-                    requested_pair = [int(item) for item in raw_pair if int(item) in candidates]
+                requested_pair = parse_cupid_pair_response(response, candidates)
             else:
                 requested_pair = choose_cupid_pair(candidates)
         else:
             if not cupid.is_human:
                 pair = choose_cupid_pair(candidates)
-                self.add_phantom_action("丘比特", cupid.seat, "cupid", None, f"连接{pair[0]}号与{pair[1]}号" if len(pair) == 2 else "跳过", self.night_count)
+                self.add_phantom_action("丘比特", cupid.seat, "cupid", None, build_cupid_phantom_decision(pair), self.night_count)
             else:
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             return
@@ -917,17 +923,11 @@ class GameEngine:
         pair = choose_cupid_pair(candidates, requested_pair)
 
         if apply_cupid_pair(self.players, pair):
-            first, second = pair
             self.cupid_paired = True
-            self.add_log(
-                "cupid_action",
-                f"[上帝视角] 丘比特连接了{first}号与{second}号",
-                seat=cupid.seat,
-                is_public=False,
-                meta={"actor_role": "丘比特", "pair": sorted(pair), "action": "pair"},
-            )
+            payload = build_cupid_action_log(cupid.seat, pair)
+            self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
             for seat in pair:
-                await self.emit("lover_info", {"lover": self.players[seat].lover}, to_seat=seat)
+                await self.emit("lover_info", build_lover_info_payload(self.players[seat].lover), to_seat=seat)
 
     async def wild_child_action(self):
         wild_child = self.get_player_by_role_any(Role.WILD_CHILD)
@@ -944,20 +944,13 @@ class GameEngine:
                     "candidates": candidates,
                     "message": "请选择一名玩家作为你的榜样；若他死亡，你将转入狼人阵营",
                 })
-                raw_target = response.get("target") if response else None
-                if raw_target is not None:
-                    try:
-                        parsed = int(raw_target)
-                    except (TypeError, ValueError):
-                        parsed = None
-                    if parsed in candidates:
-                        requested_idol = parsed
+                requested_idol = parse_wild_child_target_response(response, candidates)
             else:
                 requested_idol = choose_wild_child_idol(candidates)
         else:
             if not wild_child.is_human:
                 idol = choose_wild_child_idol(candidates)
-                self.add_phantom_action("野孩子", wild_child.seat, "wild_child", idol, f"认{idol}号为榜样" if idol else "跳过", self.night_count)
+                self.add_phantom_action("野孩子", wild_child.seat, "wild_child", idol, build_wild_child_phantom_decision(idol), self.night_count)
             else:
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             return
@@ -965,14 +958,9 @@ class GameEngine:
         idol = choose_wild_child_idol(candidates, requested_idol)
 
         if apply_wild_child_idol(wild_child, idol):
-            self.add_log(
-                "wild_child_action",
-                f"[上帝视角] {wild_child.seat}号野孩子认定了{idol}号为榜样",
-                seat=wild_child.seat,
-                is_public=False,
-                meta={"actor_role": "野孩子", "idol": idol, "action": "idol"},
-            )
-            await self.emit("wild_child_info", {"idol": idol}, to_seat=wild_child.seat)
+            payload = build_wild_child_action_log(wild_child.seat, idol)
+            self.add_log(payload["type"], payload["content"], seat=payload["seat"], is_public=False, meta=payload["meta"])
+            await self.emit("wild_child_info", build_wild_child_info_payload(idol), to_seat=wild_child.seat)
 
     async def guard_action_with_phantom(self):
         """守卫行动 - 包含死亡角色的虚拟行动用于时间混淆"""
