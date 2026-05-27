@@ -8,7 +8,7 @@ import json
 import asyncio
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,8 +20,8 @@ from dotenv import load_dotenv, set_key
 import yaml
 import httpx
 import secrets
-import jwt
 
+from admin_auth import create_admin_token, get_admin_password, verify_token
 from game_engine import GameEngine
 from game_stats import stats_manager
 
@@ -531,61 +531,6 @@ class AdminLoginRequest(BaseModel):
 
 # Security scheme
 security = HTTPBearer(auto_error=False)
-
-# JWT Configuration
-JWT_ALGORITHM = "HS256"
-
-def get_jwt_secret() -> str:
-    """Get JWT secret, auto-generate if not set"""
-    secret = os.getenv("WEREWOLF_JWT_SECRET")
-    if not secret:
-        # Generate and save a random secret
-        secret = secrets.token_urlsafe(32)
-        env_path = os.path.join(os.path.dirname(__file__), ".env")
-        try:
-            set_key(env_path, "WEREWOLF_JWT_SECRET", secret)
-        except:
-            pass
-    return secret
-
-def get_jwt_expiry_hours() -> int:
-    """Get JWT expiry in hours"""
-    try:
-        return int(os.getenv("WEREWOLF_JWT_EXPIRY_HOURS", "24"))
-    except:
-        return 24
-
-def get_admin_password() -> str:
-    """Get admin password from environment"""
-    return os.getenv("WEREWOLF_ADMIN_PASSWORD", "")
-
-def create_admin_token() -> dict:
-    """Create JWT token for admin"""
-    issued_at = datetime.now(UTC)
-    expiry = issued_at + timedelta(hours=get_jwt_expiry_hours())
-    payload = {
-        "sub": "admin",
-        "role": "admin",
-        "exp": expiry,
-        "iat": issued_at,
-    }
-    token = jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_at": expiry.isoformat(),
-        "expires_in": get_jwt_expiry_hours() * 3600
-    }
-
-def verify_token(token: str) -> dict:
-    """Verify JWT token and return payload"""
-    try:
-        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="登录凭证已过期，请重新登录")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="登录凭证无效")
 
 async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Dependency to verify admin JWT token"""
