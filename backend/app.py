@@ -22,6 +22,7 @@ import httpx
 import secrets
 
 from admin_auth import create_admin_token, get_admin_password, verify_token
+from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
 from game_engine import GameEngine
 from game_stats import stats_manager
 
@@ -75,14 +76,6 @@ def parse_model_timeout_overrides(raw: Optional[str]) -> Dict[str, int]:
 def build_model_catalog(raw_models: Any) -> List[Dict[str, str]]:
     """Return frontend-friendly model entries from config or remote payloads."""
     return [{"id": model_id, "label": model_id} for model_id in normalize_model_ids(raw_models)]
-
-
-def normalize_openai_v1_base_url(api_url: str) -> str:
-    """Accept either a root URL or a /v1 URL and normalize to the /v1 base."""
-    normalized = (api_url or "").strip().rstrip("/")
-    if not normalized:
-        return normalized
-    return normalized if normalized.endswith("/v1") else f"{normalized}/v1"
 
 
 # ========== Game Manager ==========
@@ -615,35 +608,17 @@ async def update_admin_config(request: AdminConfigUpdate, _: dict = Depends(get_
     """更新配置"""
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
-    
-    # 更新 .env 文件
-    if request.api_url:
-        normalized_api_url = normalize_openai_v1_base_url(request.api_url)
-        set_key(env_path, "WEREWOLF_API_BASE_URL", normalized_api_url)
-        if "api" not in game_manager.config:
-            game_manager.config["api"] = {}
-        game_manager.config["api"]["base_url"] = normalized_api_url
-    
-    if request.api_key:
-        set_key(env_path, "WEREWOLF_API_KEY", request.api_key)
-        if "api" not in game_manager.config:
-            game_manager.config["api"] = {}
-        game_manager.config["api"]["api_key"] = request.api_key
-    
     requested_model_ids = request.model_ids if request.model_ids is not None else request.models
-
-    # 更新 config.yaml 中的 models
-    if requested_model_ids is not None:
-        model_ids = normalize_model_ids(requested_model_ids)
-        game_manager.config["models"] = model_ids
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                yaml_config = yaml.safe_load(f) or {}
-            yaml_config["models"] = model_ids
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(yaml_config, f, allow_unicode=True, default_flow_style=False)
-        except Exception as e:
-            print(f"更新配置文件失败：{e}")
+    update_admin_config_state(
+        game_config=game_manager.config,
+        env_path=env_path,
+        config_path=config_path,
+        api_url=request.api_url,
+        api_key=request.api_key,
+        requested_model_ids=requested_model_ids,
+        normalize_model_ids=normalize_model_ids,
+        set_key_fn=set_key,
+    )
     
     return {"success": True, "message": "配置已更新"}
 
@@ -652,57 +627,20 @@ async def update_admin_config(request: AdminConfigUpdate, _: dict = Depends(get_
 async def fetch_remote_models(request: FetchModelsRequest, _: dict = Depends(get_current_admin)):
     """从远程API获取模型列表"""
     try:
-        api_config = game_manager.config.get("api", {})
-        api_url = request.api_url.strip() if request.api_url else api_config.get("base_url", "")
-        api_key = request.api_key.strip() if request.api_key else ""
-        if api_key == "use_existing":
-            api_key = api_config.get("api_key", "")
-
-        if not api_url:
-            return {"success": False, "message": "API 地址不能为空"}
-        if not api_key:
-            return {"success": False, "message": "API Key 未配置"}
-
-        models_url = normalize_openai_v1_base_url(api_url) + '/models'
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                models_url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                }
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        
-        # 解析模型数据 - 兼容多种格式
-        models_array = []
-        if isinstance(data, dict):
-            if "data" in data:
-                inner_data = data["data"]
-                if isinstance(inner_data, dict) and "data" in inner_data and isinstance(inner_data["data"], list):
-                    models_array = inner_data["data"]
-                elif isinstance(inner_data, list):
-                    models_array = inner_data
-            elif isinstance(data.get("models"), list):
-                models_array = data["models"]
-        elif isinstance(data, list):
-            models_array = data
-        
-        # 提取模型ID
-        model_ids = []
-        for model in models_array:
-            if isinstance(model, dict) and "id" in model:
-                model_ids.append(model["id"])
-            elif isinstance(model, str):
-                model_ids.append(model)
-        
+        model_ids = await fetch_remote_model_ids(
+            api_config=game_manager.config.get("api", {}),
+            api_url=request.api_url,
+            api_key=request.api_key,
+            async_client_cls=httpx.AsyncClient,
+        )
         return {
             "success": True,
             "models": model_ids,
             "model_ids": model_ids,
             "total": len(model_ids)
         }
+    except ValueError as e:
+        return {"success": False, "message": str(e)}
     except httpx.HTTPStatusError as e:
         return {"success": False, "message": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
     except Exception as e:
