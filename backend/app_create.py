@@ -25,11 +25,22 @@ def build_game_setup_kwargs(request: Any, avatars: List[str]) -> Dict[str, Any]:
     }
 
 
-def build_create_game_response(engine: Any) -> Dict[str, Any]:
+def build_preset_response_payload(preset: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not preset:
+        return None
+    return {
+        "id": preset["id"],
+        "name": preset["name"],
+        "description": preset["description"],
+    }
+
+
+def build_create_game_response(engine: Any, preset: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """构建创建对局成功响应。"""
     return {
         "game_id": engine.game_id,
         "players": [player.to_public_dict() for player in engine.players.values()],
         "status": engine.phase.value,
         "god_mode_enabled": engine.god_mode_password is not None,
+        "preset": build_preset_response_payload(preset),
     }

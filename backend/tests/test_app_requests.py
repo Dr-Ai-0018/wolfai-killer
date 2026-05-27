@@ -22,6 +22,7 @@ class AppRequestsTests(unittest.TestCase):
     def test_create_game_request_accepts_god_mode_and_string_seat_keys(self):
         request = CreateGameRequest.model_validate(
             {
+                "preset_id": "standard_6p",
                 "human_seats": [1],
                 "total_players": 5,
                 "num_wolves": 1,
@@ -31,6 +32,7 @@ class AppRequestsTests(unittest.TestCase):
             }
         )
 
+        self.assertEqual(request.preset_id, "standard_6p")
         self.assertEqual(request.human_seats, [1])
         self.assertEqual(request.seat_model_map, {1: "gpt-5.4-mini"})
         self.assertIsInstance(request.god_mode, GodModeConfig)

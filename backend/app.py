@@ -62,6 +62,7 @@ from app_requests import (
     validate_role_balance,
 )
 from game_stats import stats_manager
+from game_presets import apply_game_preset_to_request, build_game_preset_catalog, get_game_preset
 from game_views import (
     build_phantom_actions_payload,
     get_engine_or_404,
@@ -143,6 +144,12 @@ async def get_models():
     return build_model_catalog(game_manager.config.get("models", []), normalize_model_ids)
 
 
+@app.get("/api/config/presets")
+async def get_presets():
+    """Get available official-style game presets"""
+    return build_game_preset_catalog()
+
+
 @app.get("/api/stats/overview")
 async def get_stats():
     """获取总览统计"""
@@ -188,6 +195,10 @@ async def get_game_detail(game_id: str):
 @app.post("/api/game/create")
 async def create_game(request: CreateGameRequest):
     """Create a new game"""
+    preset = get_game_preset(request.preset_id)
+    if request.preset_id and not preset:
+        raise HTTPException(status_code=400, detail="预设板子不存在")
+    apply_game_preset_to_request(request, preset)
     validate_role_balance(request.total_players, request.role_config, request.num_wolves)
     god_mode_password = resolve_god_mode_password(request.god_mode)
     
@@ -202,7 +213,7 @@ async def create_game(request: CreateGameRequest):
     avatars = game_manager.get_avatars()
     await engine.setup(**build_game_setup_kwargs(request, avatars))
 
-    return build_create_game_response(engine)
+    return build_create_game_response(engine, preset)
 
 
 @app.get("/api/game/{game_id}/status")

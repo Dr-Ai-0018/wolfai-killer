@@ -16,6 +16,7 @@ class GodModeConfig(BaseModel):
 
 class CreateGameRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
+    preset_id: Optional[str] = None
     human_seats: List[int] = []
     total_players: int = 12
     num_wolves: int = 3

@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app_create import build_create_game_response, build_game_setup_kwargs, resolve_god_mode_password
+from app_create import build_create_game_response, build_game_setup_kwargs, build_preset_response_payload, resolve_god_mode_password
 from app_requests import CreateGameRequest
 
 
@@ -69,7 +69,10 @@ class AppCreateTests(unittest.TestCase):
         )
 
     def test_build_create_game_response(self):
-        payload = build_create_game_response(DummyEngine())
+        payload = build_create_game_response(
+            DummyEngine(),
+            {"id": "standard_6p", "name": "标准六人局", "description": "desc"},
+        )
 
         self.assertEqual(
             payload,
@@ -78,7 +81,15 @@ class AppCreateTests(unittest.TestCase):
                 "players": [{"seat": 1}, {"seat": 2}],
                 "status": "waiting",
                 "god_mode_enabled": True,
+                "preset": {"id": "standard_6p", "name": "标准六人局", "description": "desc"},
             },
+        )
+
+    def test_build_preset_response_payload(self):
+        self.assertIsNone(build_preset_response_payload(None))
+        self.assertEqual(
+            build_preset_response_payload({"id": "p1", "name": "标准板", "description": "说明", "role_config": {}}),
+            {"id": "p1", "name": "标准板", "description": "说明"},
         )
 
 
