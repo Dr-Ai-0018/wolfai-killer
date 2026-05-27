@@ -1,22 +1,20 @@
 # AI Werewolf Game Configuration
 
 api:
-  base_url: "https://api.killerbest.com"
+  base_url: "https://api.killerbest.com/v1"
   api_key: ""  # Set via environment variable WEREWOLF_API_KEY
   default_timeout: 60
   model_timeout_map:
-    bl-DeepSeek-R1: 600
-    bl-DeepSeek-R1-0528: 600
-    bl-DeepSeek-V3-250324: 60
-    bl-DeepSeek-V3.1-Terminus: 60
-    bl-DeepSeek-V3.1: 60
-    bl-DeepSeek-V3.2-Exp: 60
+    gpt-5.2: 90
+    gpt-5.3-codex: 90
+    gpt-5.4: 90
+    gpt-5.4-mini: 60
 
 models:  # Configured model id pool used for random/manual AI assignment
-  - bl-DeepSeek-V3-250324
-  - bl-DeepSeek-V3.1-Terminus
-  - bl-DeepSeek-V3.1
-  - bl-DeepSeek-V3.2-Exp
+  - gpt-5.4-mini
+  - gpt-5.4
+  - gpt-5.3-codex
+  - gpt-5.2
 
 game:
   default_players: 12

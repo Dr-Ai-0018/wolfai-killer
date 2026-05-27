@@ -1,6 +1,6 @@
 """
-AI Werewolf - WebSocket-First FastAPI Application
-Completely rewritten for real-time gameplay
+月夜狼人杀后端应用
+基于 WebSocket 的实时对局服务
 """
 
 import os
@@ -8,14 +8,14 @@ import json
 import asyncio
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv, set_key
 import yaml
 import httpx
@@ -50,9 +50,39 @@ def normalize_model_ids(raw_models: Any) -> List[str]:
     return model_ids
 
 
+def parse_model_timeout_overrides(raw: Optional[str]) -> Dict[str, int]:
+    """Parse env overrides like 'gpt-5.4-mini=15,gpt-5.4=20'."""
+    if not raw:
+        return {}
+
+    overrides: Dict[str, int] = {}
+    for chunk in raw.split(","):
+        item = chunk.strip()
+        if not item or "=" not in item:
+            continue
+        model_name, timeout_value = item.split("=", 1)
+        model_name = model_name.strip()
+        timeout_value = timeout_value.strip()
+        if not model_name or not timeout_value:
+            continue
+        try:
+            overrides[model_name] = int(timeout_value)
+        except ValueError:
+            continue
+    return overrides
+
+
 def build_model_catalog(raw_models: Any) -> List[Dict[str, str]]:
     """Return frontend-friendly model entries from config or remote payloads."""
     return [{"id": model_id, "label": model_id} for model_id in normalize_model_ids(raw_models)]
+
+
+def normalize_openai_v1_base_url(api_url: str) -> str:
+    """Accept either a root URL or a /v1 URL and normalize to the /v1 base."""
+    normalized = (api_url or "").strip().rstrip("/")
+    if not normalized:
+        return normalized
+    return normalized if normalized.endswith("/v1") else f"{normalized}/v1"
 
 
 # ========== Game Manager ==========
@@ -70,7 +100,7 @@ class GameManager:
             with open(config_path, "r", encoding="utf-8") as f:
                 self.config = yaml.safe_load(f)
         except Exception as e:
-            print(f"Failed to load config: {e}")
+            print(f"加载配置失败：{e}")
             self.config = {}
         
         # Override with environment variables
@@ -84,6 +114,21 @@ class GameManager:
         base_url = os.getenv("WEREWOLF_API_BASE_URL")
         if base_url:
             self.config["api"]["base_url"] = base_url
+
+        default_timeout = os.getenv("WEREWOLF_API_DEFAULT_TIMEOUT")
+        if default_timeout:
+            try:
+                self.config["api"]["default_timeout"] = int(default_timeout)
+            except ValueError:
+                pass
+
+        model_timeout_overrides = parse_model_timeout_overrides(os.getenv("WEREWOLF_API_MODEL_TIMEOUTS"))
+        if model_timeout_overrides:
+            existing = self.config["api"].get("model_timeout_map", {})
+            if not isinstance(existing, dict):
+                existing = {}
+            existing = {**existing, **model_timeout_overrides}
+            self.config["api"]["model_timeout_map"] = existing
 
         self.config["models"] = normalize_model_ids(self.config.get("models", []))
     
@@ -156,18 +201,18 @@ game_manager = GameManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting AI Werewolf Server...")
+    print("正在启动月夜狼人杀服务...")
     game_manager.load_config()
-    print("Configuration loaded")
-    print("AI Werewolf Server started successfully!")
+    print("配置已加载")
+    print("月夜狼人杀服务已启动")
     yield
-    print("Shutting down AI Werewolf Server...")
+    print("月夜狼人杀服务正在关闭...")
 
 
 # ========== FastAPI App ==========
 
 app = FastAPI(
-    title="AI Werewolf API",
+    title="月夜狼人杀接口",
     version="2.0.0",
     lifespan=lifespan
 )
@@ -190,11 +235,13 @@ if os.path.exists(emojis_path):
 # ========== Pydantic Models ==========
 
 class GodModeConfig(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     enabled: bool = False
     password: str = ""
 
 
 class CreateGameRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     human_seats: List[int] = []
     total_players: int = 12
     num_wolves: int = 3
@@ -204,7 +251,29 @@ class CreateGameRequest(BaseModel):
     god_mode: Optional[GodModeConfig] = None
 
 
+def validate_role_balance(total_players: int, role_config: Optional[Dict[str, int]], num_wolves: int) -> None:
+    wolf_role_codes = {"WOLF", "WOLF_KING", "WHITE_WOLF", "BEAUTY"}
+    configured_wolves = num_wolves
+
+    if role_config:
+        configured_wolves = sum(int(role_config.get(code, 0) or 0) for code in wolf_role_codes)
+        total_roles = sum(int(count or 0) for count in role_config.values())
+        if total_roles != total_players:
+            raise HTTPException(status_code=400, detail="角色数量必须与总人数一致")
+
+    if configured_wolves < 1:
+        raise HTTPException(status_code=400, detail="至少需要 1 个狼人阵营角色")
+
+    max_wolves = max(1, (total_players - 1) // 3)
+    if configured_wolves > max_wolves:
+        raise HTTPException(
+            status_code=400,
+            detail=f"当前 {total_players} 人局最多允许 {max_wolves} 个狼人阵营角色，避免出现人数过快持平的失衡配置",
+        )
+
+
 class ActionRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     action_type: str
     data: Dict[str, Any] = {}
 
@@ -213,7 +282,7 @@ class ActionRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"name": "AI Werewolf API", "version": "2.0.0"}
+    return {"name": "月夜狼人杀接口", "version": "2.0.0"}
 
 
 @app.get("/api/config/roles")
@@ -286,13 +355,15 @@ async def get_game_detail(game_id: str):
     """获取单局游戏详情"""
     game = stats_manager.get_game_detail(game_id)
     if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     return game
 
 
 @app.post("/api/game/create")
 async def create_game(request: CreateGameRequest):
     """Create a new game"""
+    validate_role_balance(request.total_players, request.role_config, request.num_wolves)
+
     # 处理上帝模式配置
     god_mode_password = None
     if request.god_mode and request.god_mode.enabled:
@@ -331,7 +402,7 @@ async def get_game_status(game_id: str):
     """Get game status"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     return {
         "game_id": game_id,
@@ -344,6 +415,7 @@ async def get_game_status(game_id: str):
         "waiting_for_human": engine.waiting_for_human,
         "human_action_type": engine.human_action_type,
         "human_action_options": engine.human_action_options,
+        "day_summary": engine.build_day_summary(),
     }
 
 
@@ -352,7 +424,7 @@ async def get_players(game_id: str):
     """Get players list"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     return [p.to_public_dict() for p in engine.players.values()]
 
@@ -362,7 +434,7 @@ async def get_player_view(game_id: str, seat: int):
     """Get player's private view"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     player = engine.players.get(seat)
     if not player:
@@ -376,7 +448,7 @@ async def get_game_log(game_id: str, offset: int = 0, limit: int = 100):
     """Get game logs"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     public_logs = [log for log in engine.logs if log.get("is_public", True)]
     return {"logs": public_logs[offset:offset+limit], "total": len(public_logs)}
@@ -387,7 +459,7 @@ async def start_game(game_id: str):
     """Start the game"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     # Start game in background
     asyncio.create_task(engine.start())
@@ -400,7 +472,7 @@ async def pause_game(game_id: str):
     """Pause the game"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     engine.pause()
     return {"success": True, "message": "Game paused"}
@@ -411,10 +483,10 @@ async def resume_game(game_id: str):
     """Resume the game"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     engine.resume()
-    return {"success": True, "message": "Game resumed"}
+    return {"success": True, "message": "对局已继续"}
 
 
 @app.post("/api/game/{game_id}/action")
@@ -422,20 +494,22 @@ async def submit_action(game_id: str, request: ActionRequest):
     """Submit human player action (REST fallback)"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     if engine.waiting_for_human:
         success = engine.submit_human_action(engine.waiting_for_human, request.data)
         return {"success": success}
     
-    return {"success": False, "message": "No action pending"}
+    return {"success": False, "message": "当前没有待提交的玩家操作"}
 
 
 class GodModeVerifyRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     password: str
 
 
 class AdminConfigUpdate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     api_url: Optional[str] = None
     api_key: Optional[str] = None
     models: Optional[List[str]] = None
@@ -443,11 +517,13 @@ class AdminConfigUpdate(BaseModel):
 
 
 class FetchModelsRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     api_url: str
     api_key: str
 
 
 class AdminLoginRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     password: str
 
 
@@ -485,12 +561,13 @@ def get_admin_password() -> str:
 
 def create_admin_token() -> dict:
     """Create JWT token for admin"""
-    expiry = datetime.utcnow() + timedelta(hours=get_jwt_expiry_hours())
+    issued_at = datetime.now(UTC)
+    expiry = issued_at + timedelta(hours=get_jwt_expiry_hours())
     payload = {
         "sub": "admin",
         "role": "admin",
         "exp": expiry,
-        "iat": datetime.utcnow()
+        "iat": issued_at,
     }
     token = jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
     return {
@@ -506,9 +583,9 @@ def verify_token(token: str) -> dict:
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token已过期，请重新登录")
+        raise HTTPException(status_code=401, detail="登录凭证已过期，请重新登录")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="无效的Token")
+        raise HTTPException(status_code=401, detail="登录凭证无效")
 
 async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Dependency to verify admin JWT token"""
@@ -558,7 +635,7 @@ async def refresh_admin_token(admin: dict = Depends(get_current_admin)):
     token_data = create_admin_token()
     return {
         "success": True,
-        "message": "Token已刷新",
+        "message": "登录凭证已刷新",
         **token_data
     }
 
@@ -596,10 +673,11 @@ async def update_admin_config(request: AdminConfigUpdate, _: dict = Depends(get_
     
     # 更新 .env 文件
     if request.api_url:
-        set_key(env_path, "WEREWOLF_API_BASE_URL", request.api_url)
+        normalized_api_url = normalize_openai_v1_base_url(request.api_url)
+        set_key(env_path, "WEREWOLF_API_BASE_URL", normalized_api_url)
         if "api" not in game_manager.config:
             game_manager.config["api"] = {}
-        game_manager.config["api"]["base_url"] = request.api_url
+        game_manager.config["api"]["base_url"] = normalized_api_url
     
     if request.api_key:
         set_key(env_path, "WEREWOLF_API_KEY", request.api_key)
@@ -620,7 +698,7 @@ async def update_admin_config(request: AdminConfigUpdate, _: dict = Depends(get_
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(yaml_config, f, allow_unicode=True, default_flow_style=False)
         except Exception as e:
-            print(f"Failed to update config.yaml: {e}")
+            print(f"更新配置文件失败：{e}")
     
     return {"success": True, "message": "配置已更新"}
 
@@ -640,7 +718,7 @@ async def fetch_remote_models(request: FetchModelsRequest, _: dict = Depends(get
         if not api_key:
             return {"success": False, "message": "API Key 未配置"}
 
-        models_url = api_url.rstrip('/') + '/models'
+        models_url = normalize_openai_v1_base_url(api_url) + '/models'
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
                 models_url,
@@ -691,7 +769,7 @@ async def verify_god_mode(game_id: str, request: GodModeVerifyRequest):
     """验证上帝模式密码"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     if not engine.god_mode_password:
         return {"success": False, "message": "本局游戏未启用上帝模式"}
@@ -707,7 +785,7 @@ async def get_god_mode_logs(game_id: str, password: str, offset: int = 0, limit:
     """获取上帝模式日志（包含所有私密信息）"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     if not engine.god_mode_password:
         raise HTTPException(status_code=403, detail="本局游戏未启用上帝模式")
@@ -724,7 +802,7 @@ async def get_god_mode_players(game_id: str, password: str):
     """获取所有玩家的完整信息（包括身份）"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     if not engine.god_mode_password:
         raise HTTPException(status_code=403, detail="本局游戏未启用上帝模式")
@@ -741,7 +819,7 @@ async def get_phantom_actions(game_id: str):
     """获取冥界复盘数据 - 死亡角色的虚拟行动记录（仅游戏结束后可见）"""
     engine = game_manager.get_game(game_id)
     if not engine:
-        raise HTTPException(status_code=404, detail="Game not found")
+        raise HTTPException(status_code=404, detail="未找到该对局")
     
     # 只有游戏结束后才能查看冥界复盘
     if engine.phase.value != "ended":
@@ -763,7 +841,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, seat: int):
     
     engine = game_manager.get_game(game_id)
     if not engine:
-        await websocket.send_json({"event": "error", "data": {"message": "Game not found"}})
+        await websocket.send_json({"event": "error", "data": {"message": "未找到该对局"}})
         await websocket.close()
         return
     
@@ -813,7 +891,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, seat: int):
     except WebSocketDisconnect:
         game_manager.remove_connection(game_id, seat)
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"实时通道错误：{e}")
         game_manager.remove_connection(game_id, seat)
 
 

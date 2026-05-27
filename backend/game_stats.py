@@ -38,9 +38,13 @@ class GameStatsManager:
         self.data_dir = data_dir
         self.history_file = os.path.join(data_dir, "game_history.json")
         self.stats_file = os.path.join(data_dir, "game_stats.json")
+        self.reports_dir = os.path.join(data_dir, "reports")
+        self.raw_games_dir = os.path.join(data_dir, "games")
         
         # 确保目录存在
         os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(self.reports_dir, exist_ok=True)
+        os.makedirs(self.raw_games_dir, exist_ok=True)
         
         # 加载数据
         self.history: List[Dict] = self._load_history()
@@ -53,7 +57,7 @@ class GameStatsManager:
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     return json.load(f)
         except Exception as e:
-            print(f"Failed to load history: {e}")
+            print(f"加载历史记录失败：{e}")
         return []
     
     def _load_stats(self) -> Dict:
@@ -63,7 +67,7 @@ class GameStatsManager:
                 with open(self.stats_file, "r", encoding="utf-8") as f:
                     return json.load(f)
         except Exception as e:
-            print(f"Failed to load stats: {e}")
+            print(f"加载统计数据失败：{e}")
         return self._init_stats()
     
     def _init_stats(self) -> Dict:
@@ -89,6 +93,8 @@ class GameStatsManager:
                 "女巫": {"games": 0, "wins": 0, "deaths": 0, "heals": 0, "poisons": 0},
                 "猎人": {"games": 0, "wins": 0, "deaths": 0, "shots": 0, "wolf_shots": 0},
                 "守卫": {"games": 0, "wins": 0, "deaths": 0, "guards": 0, "successful_guards": 0},
+                "狐狸": {"games": 0, "wins": 0, "deaths": 0},
+                "天使": {"games": 0, "wins": 0, "deaths": 0},
                 "丘比特": {"games": 0, "wins": 0, "deaths": 0},
                 "白痴": {"games": 0, "wins": 0, "deaths": 0},
                 "长老": {"games": 0, "wins": 0, "deaths": 0},
@@ -110,7 +116,7 @@ class GameStatsManager:
             with open(self.history_file, "w", encoding="utf-8") as f:
                 json.dump(self.history, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"Failed to save history: {e}")
+            print(f"保存历史记录失败：{e}")
     
     def _save_stats(self):
         """保存统计数据"""
@@ -119,10 +125,19 @@ class GameStatsManager:
             with open(self.stats_file, "w", encoding="utf-8") as f:
                 json.dump(self.stats, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"Failed to save stats: {e}")
+            print(f"保存统计数据失败：{e}")
     
     def record_game(self, game_record: Dict):
         """记录一局游戏"""
+        game_id = str(game_record.get("game_id") or f"game-{len(self.history) + 1}")
+        try:
+            raw_path = os.path.join(self.raw_games_dir, f"{game_id}.json")
+            with open(raw_path, "w", encoding="utf-8") as f:
+                json.dump(game_record, f, ensure_ascii=False, indent=2)
+            game_record["raw_record_path"] = raw_path
+        except Exception as e:
+            print(f"保存原始对局记录失败：{e}")
+
         # 添加到历史
         self.history.insert(0, game_record)  # 最新的在前面
         

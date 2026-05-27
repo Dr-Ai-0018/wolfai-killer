@@ -51,7 +51,7 @@ class Settings(BaseSettings):
             with open(config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         except Exception as e:
-            print(f"Failed to load config.yaml: {e}")
+            print(f"加载 config.yaml 失败：{e}")
             return {}
     
     def update_from_yaml(self):
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
             
             return True
         except Exception as e:
-            print(f"Failed to save config.yaml: {e}")
+            print(f"保存 config.yaml 失败：{e}")
             return False
 
 
