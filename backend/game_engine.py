@@ -29,6 +29,7 @@ from game_ai_context import (
     build_system_prompt as build_ai_system_prompt,
     build_vote_context,
 )
+from game_day import build_human_speech_options, build_speech_log, resolve_human_speech
 from game_vote import (
     apply_vote_rights,
     build_cast_vote_log,
@@ -1563,15 +1564,13 @@ class GameEngine:
             player = self.players[seat]
             
             if player.is_human:
-                response = await self.wait_for_human(seat, "speech", {
-                    "message": "请发言",
-                    "timeout": 60,
-                })
-                speech = response.get("content", "（未发言）") if response else "（未发言）"
+                response = await self.wait_for_human(seat, "speech", build_human_speech_options())
+                speech = resolve_human_speech(response)
             else:
                 speech = await self.generate_ai_speech(player)
             
-            self.add_log("speech", speech, seat=seat, meta=self.extract_speech_meta(speech))
+            payload = build_speech_log(seat, speech, self.extract_speech_meta)
+            self.add_log(payload["type"], payload["content"], seat=payload["seat"], meta=payload["meta"])
             await self.emit_state()
             await asyncio.sleep(0.5)  # Brief pause between speeches
         
