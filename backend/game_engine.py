@@ -14,6 +14,13 @@ from typing import List, Dict, Optional, Any, Set, Callable
 from datetime import datetime
 import httpx
 
+from game_review import (
+    ROLE_CLAIM_KEYWORDS,
+    build_day_summary as summarize_day_state,
+    build_public_claim_summary as summarize_public_claims,
+    extract_speech_meta as extract_public_speech_meta,
+)
+
 
 def normalize_model_ids(raw_models: Any) -> List[str]:
     """Normalize config models into a unique list of ids."""
@@ -96,23 +103,6 @@ PERSONALITIES = [
 ]
 
 PERSONALITY_MAP = {p.code: p for p in PERSONALITIES}
-ROLE_CLAIM_KEYWORDS = {
-    Role.SEER.value: ["预言家"],
-    Role.WITCH.value: ["女巫"],
-    Role.GUARD.value: ["守卫"],
-    Role.HUNTER.value: ["猎人"],
-    Role.FOX.value: ["狐狸"],
-    Role.ANGEL.value: ["天使"],
-    Role.SCAPEGOAT.value: ["替罪羊"],
-    Role.MASON.value: ["共济会", "共济会成员"],
-    Role.SUPER_SAINT.value: ["圣徒"],
-    Role.CUPID.value: ["丘比特"],
-    Role.ELDER.value: ["长老", "高级村民"],
-    Role.IDIOT.value: ["白痴"],
-    Role.WILD_CHILD.value: ["野孩子"],
-    Role.CURSED.value: ["被诅咒者"],
-    Role.BLESSED.value: ["受祝福者"],
-}
 
 
 @dataclass
@@ -335,44 +325,10 @@ class GameEngine:
 
     @staticmethod
     def extract_speech_meta(speech: str) -> Dict[str, Any]:
-        """Pull lightweight structure from free-form speech for UI and heuristics."""
-        mentioned_seats = sorted({int(item) for item in re.findall(r"(\d+)号", speech)})
-        claimed_role = None
-        claim_window = re.split(r"[。；\n]", speech, maxsplit=1)[0][:120].strip()
-        for role_name, keywords in ROLE_CLAIM_KEYWORDS.items():
-            for keyword in keywords:
-                claim_patterns = [
-                    rf"^[【\[]?\s*我是\d+号(?:玩家)?[】\]]?.*?身份是{keyword}",
-                    rf"^[【\[]?\s*我是\d+号(?:玩家)?[】\]]?.*?我是{keyword}",
-                    rf"^[【\[]?\s*我是\d+号(?:玩家)?[】\]]?.*?跳{keyword}",
-                    rf"^[【\[]?\s*我是\d+号(?:玩家)?[】\]]?.*?单跳{keyword}",
-                ]
-                if any(re.search(pattern, claim_window) for pattern in claim_patterns):
-                    claimed_role = role_name
-                    break
-            if claimed_role:
-                break
-        return {
-            "claimed_role": claimed_role,
-            "mentioned_seats": mentioned_seats,
-        }
+        return extract_public_speech_meta(speech, ROLE_CLAIM_KEYWORDS)
 
     def build_public_claim_summary(self) -> Dict[str, List[int]]:
-        """Summarize public role claims from alive players."""
-        claims: Dict[str, List[int]] = {}
-        alive = set(self.get_alive_seats())
-        for log in self.logs:
-            if not log.get("is_public") or log.get("type") != "speech":
-                continue
-            seat = int(log.get("seat") or 0)
-            if seat not in alive:
-                continue
-            claimed_role = (log.get("meta") or {}).get("claimed_role")
-            if claimed_role:
-                claims.setdefault(str(claimed_role), [])
-                if seat not in claims[str(claimed_role)]:
-                    claims[str(claimed_role)].append(seat)
-        return claims
+        return summarize_public_claims(self.logs, self.get_alive_seats())
 
     def build_vote_scores(self, player: Player, candidates: List[int], current_votes: Dict[int, int]) -> Dict[int, int]:
         """Heuristic score for day voting to reduce blind dogpiles."""
@@ -509,51 +465,12 @@ class GameEngine:
         return scores
 
     def build_day_summary(self) -> Dict[str, Any]:
-        """Summarize public day-phase signals for UI consumption."""
-        claims = self.build_public_claim_summary()
-        speeches = [
-            log for log in self.logs
-            if log.get("is_public") and log.get("type") == "speech" and log.get("day") == self.day_count
-        ]
-        votes = [
-            log for log in self.logs
-            if log.get("is_public") and log.get("type") == "vote" and log.get("day") == self.day_count
-        ]
-        vote_counts: Dict[int, int] = {}
-        vote_map: Dict[int, int] = {}
-        mentioned_pressure: Dict[int, int] = {}
-        for log in speeches:
-            meta = log.get("meta") or {}
-            for seat in meta.get("mentioned_seats") or []:
-                seat_num = int(seat)
-                mentioned_pressure[seat_num] = mentioned_pressure.get(seat_num, 0) + 1
-        for log in votes:
-            meta = log.get("meta") or {}
-            voter = int(meta.get("voter") or 0)
-            target = int(meta.get("target") or 0)
-            if voter and target:
-                vote_map[voter] = target
-                vote_counts[target] = vote_counts.get(target, 0) + 1
-
-        pressure_board = []
-        alive = set(self.get_alive_seats())
-        for seat in sorted(alive):
-            pressure_board.append({
-                "seat": seat,
-                "mentions": mentioned_pressure.get(seat, 0),
-                "votes": vote_counts.get(seat, 0),
-                "claimed_role": next((role_name for role_name, seats in claims.items() if seat in seats), None),
-            })
-        pressure_board.sort(key=lambda item: (-item["votes"], -item["mentions"], item["seat"]))
-
-        return {
-            "day": self.day_count,
-            "phase": self.phase.value,
-            "claims": claims,
-            "vote_map": vote_map,
-            "vote_counts": vote_counts,
-            "pressure_board": pressure_board,
-        }
+        return summarize_day_state(
+            logs=self.logs,
+            alive_seats=self.get_alive_seats(),
+            day_count=self.day_count,
+            phase=self.phase.value,
+        )
 
     async def setup(self, human_seats: List[int], total_players: int = 12, num_wolves: int = 3, 
                     role_config: Dict[str, int] = None, avatars: List[str] = None,
