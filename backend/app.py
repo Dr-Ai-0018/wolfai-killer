@@ -28,6 +28,12 @@ from admin_auth_routes import (
     build_admin_verify_payload,
 )
 from app_create import build_create_game_response, build_game_setup_kwargs, resolve_god_mode_password
+from app_game_read import (
+    get_game_log_response,
+    get_game_player_view_response,
+    get_game_players_response,
+    get_game_status_response,
+)
 from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
 from admin_routes import (
     build_admin_config_updated_response,
@@ -54,11 +60,8 @@ from game_control import build_success_response, submit_waiting_human_action
 from game_engine import GameEngine
 from game_stats import stats_manager
 from game_views import (
-    build_game_status_payload,
     build_phantom_actions_payload,
-    build_public_logs_payload,
     get_engine_or_404,
-    get_player_or_404,
     verify_god_mode_access,
 )
 from game_ws import build_connected_payload, build_missing_game_payload, handle_websocket_message
@@ -355,30 +358,25 @@ async def create_game(request: CreateGameRequest):
 @app.get("/api/game/{game_id}/status")
 async def get_game_status(game_id: str):
     """Get game status"""
-    engine = get_engine_or_404(game_manager, game_id)
-    return build_game_status_payload(engine, game_id)
+    return get_game_status_response(game_manager, game_id)
 
 
 @app.get("/api/game/{game_id}/players")
 async def get_players(game_id: str):
     """Get players list"""
-    engine = get_engine_or_404(game_manager, game_id)
-    return [p.to_public_dict() for p in engine.players.values()]
+    return get_game_players_response(game_manager, game_id)
 
 
 @app.get("/api/game/{game_id}/player/{seat}")
 async def get_player_view(game_id: str, seat: int):
     """Get player's private view"""
-    engine = get_engine_or_404(game_manager, game_id)
-    player = get_player_or_404(engine, seat)
-    return player.to_private_dict()
+    return get_game_player_view_response(game_manager, game_id, seat)
 
 
 @app.get("/api/game/{game_id}/log")
 async def get_game_log(game_id: str, offset: int = 0, limit: int = 100):
     """Get game logs"""
-    engine = get_engine_or_404(game_manager, game_id)
-    return build_public_logs_payload(engine, offset, limit)
+    return get_game_log_response(game_manager, game_id, offset, limit)
 
 
 @app.post("/api/game/{game_id}/start")
