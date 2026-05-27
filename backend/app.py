@@ -21,6 +21,7 @@ import httpx
 import secrets
 
 from admin_auth import create_admin_token, get_admin_password, verify_token
+from app_create import build_create_game_response, build_game_setup_kwargs, resolve_god_mode_password
 from admin_config import fetch_remote_model_ids, normalize_openai_v1_base_url, update_admin_config_state
 from admin_routes import (
     build_admin_config_updated_response,
@@ -329,11 +330,7 @@ async def get_game_detail(game_id: str):
 async def create_game(request: CreateGameRequest):
     """Create a new game"""
     validate_role_balance(request.total_players, request.role_config, request.num_wolves)
-
-    # 处理上帝模式配置
-    god_mode_password = None
-    if request.god_mode and request.god_mode.enabled:
-        god_mode_password = request.god_mode.password
+    god_mode_password = resolve_god_mode_password(request.god_mode)
     
     engine = game_manager.create_game(
         human_seats=request.human_seats,
@@ -343,24 +340,10 @@ async def create_game(request: CreateGameRequest):
         god_mode_password=god_mode_password
     )
     
-    # Setup with avatars and model configuration
     avatars = game_manager.get_avatars()
-    await engine.setup(
-        human_seats=request.human_seats,
-        total_players=request.total_players,
-        num_wolves=request.num_wolves,
-        role_config=request.role_config,
-        avatars=avatars,
-        random_models=request.random_models,
-        seat_model_map=request.seat_model_map
-    )
-    
-    return {
-        "game_id": engine.game_id,
-        "players": [p.to_public_dict() for p in engine.players.values()],
-        "status": engine.phase.value,
-        "god_mode_enabled": engine.god_mode_password is not None,
-    }
+    await engine.setup(**build_game_setup_kwargs(request, avatars))
+
+    return build_create_game_response(engine)
 
 
 @app.get("/api/game/{game_id}/status")
