@@ -235,6 +235,21 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { configApi, gameApi } from '@/api'
+import {
+  buildRecommendedRoleConfig,
+  buildSeatModelMap,
+  buildWolfOptions,
+  canDecreaseRoleCount,
+  canIncreaseRoleCount,
+  countWolves,
+  DEFAULT_MODELS,
+  DEFAULT_ROLES,
+  getMaxWolves,
+  getModelId,
+  getModelLabel,
+  PLAYER_OPTIONS,
+  withBalancedVillagers,
+} from '@/gameSetup'
 
 const router = useRouter()
 
@@ -283,14 +298,10 @@ const config = ref({
 })
 
 // 可选人数范围
-const playerOptions = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+const playerOptions = PLAYER_OPTIONS
 
 // 狼人数量选项（根据总人数动态计算）
-const wolfOptions = computed(() => {
-  const total = config.value.totalPlayers
-  const maxWolves = Math.max(1, Math.floor((total - 1) / 3))
-  return Array.from({ length: maxWolves }, (_, i) => i + 1)
-})
+const wolfOptions = computed(() => buildWolfOptions(config.value.totalPlayers))
 
 // 总角色数
 const totalRoleCount = computed(() => {
@@ -303,7 +314,7 @@ const roleCountValid = computed(() => {
 })
 
 const wolfCountValid = computed(() => {
-  const maxWolves = Math.max(1, Math.floor((config.value.totalPlayers - 1) / 3))
+  const maxWolves = getMaxWolves(config.value.totalPlayers)
   return totalWolfCount.value >= 1 && totalWolfCount.value <= maxWolves
 })
 
@@ -326,13 +337,7 @@ const onTotalPlayersChange = () => {
 
 // 更新村民数量（自动填充）
 const updateVillagerCount = () => {
-  let nonVillagerCount = 0
-  for (const [code, count] of Object.entries(config.value.roleConfig)) {
-    if (code !== 'VILLAGER') {
-      nonVillagerCount += count
-    }
-  }
-  config.value.roleConfig.VILLAGER = Math.max(0, config.value.totalPlayers - nonVillagerCount)
+  config.value.roleConfig = withBalancedVillagers(config.value.roleConfig, config.value.totalPlayers)
 }
 
 // 增加角色数量
@@ -355,46 +360,17 @@ const decreaseRole = (code) => {
   }
 }
 
-// 狼人阵营角色
-const wolfRoles = ['WOLF', 'WOLF_KING', 'WHITE_WOLF', 'BEAUTY']
-
 // 计算当前狼人总数
-const totalWolfCount = computed(() => {
-  return wolfRoles.reduce((sum, code) => sum + (config.value.roleConfig[code] || 0), 0)
-})
+const totalWolfCount = computed(() => countWolves(config.value.roleConfig))
 
 // 是否可以增加
 const canIncreaseRole = (code) => {
-  // 狼人阵营角色
-  if (wolfRoles.includes(code)) {
-    const maxWolves = Math.max(1, Math.floor((config.value.totalPlayers - 1) / 3))
-    return totalWolfCount.value < maxWolves
-  }
-  if (code === 'VILLAGER') {
-    return totalRoleCount.value < config.value.totalPlayers
-  }
-  // 神职最多 1 个
-  return (config.value.roleConfig[code] || 0) < 1
+  return canIncreaseRoleCount(code, config.value.roleConfig, config.value.totalPlayers)
 }
 
 // 是否可以减少
 const canDecreaseRole = (code) => {
-  // 狼人阵营角色
-  if (wolfRoles.includes(code)) {
-    if (code === 'WOLF') {
-      if (config.value.totalPlayers === 5) {
-        return config.value.roleConfig.WOLF > 1
-      }
-      // 普通狼人至少要有 1 个（如果没有其他狼人角色）
-      const otherWolves = totalWolfCount.value - config.value.roleConfig.WOLF
-      return config.value.roleConfig.WOLF > (otherWolves > 0 ? 0 : 1)
-    }
-    return (config.value.roleConfig[code] || 0) > 0
-  }
-  if (code === 'VILLAGER') {
-    return config.value.roleConfig.VILLAGER > 0
-  }
-  return (config.value.roleConfig[code] || 0) > 0
+  return canDecreaseRoleCount(code, config.value.roleConfig, config.value.totalPlayers)
 }
 
 const toggleHumanSeat = (seat) => {
@@ -406,63 +382,9 @@ const toggleHumanSeat = (seat) => {
   }
 }
 
-const buildEmptyRoleConfig = () => ({
-  WOLF: 0,
-  WOLF_KING: 0,
-  WHITE_WOLF: 0,
-  BEAUTY: 0,
-  SEER: 0,
-  WITCH: 0,
-  GUARD: 0,
-  HUNTER: 0,
-  FOX: 0,
-  ANGEL: 0,
-  SCAPEGOAT: 0,
-  MASON: 0,
-  SUPER_SAINT: 0,
-  CUPID: 0,
-  IDIOT: 0,
-  ELDER: 0,
-  WILD_CHILD: 0,
-  CURSED: 0,
-  BLESSED: 0,
-  VILLAGER: 0
-})
-
 const applyRecommendedSetup = (totalPlayers) => {
-  const roleConfig = buildEmptyRoleConfig()
-
-  if (totalPlayers === 5) {
-    Object.assign(roleConfig, { WOLF: 1, SEER: 1, WITCH: 1, VILLAGER: 2 })
-  } else if (totalPlayers === 6) {
-    Object.assign(roleConfig, { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, VILLAGER: 1 })
-  } else if (totalPlayers === 7) {
-    Object.assign(roleConfig, { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, HUNTER: 1, VILLAGER: 1 })
-  } else if (totalPlayers === 8) {
-    Object.assign(roleConfig, { WOLF: 2, SEER: 1, WITCH: 1, GUARD: 1, HUNTER: 1, VILLAGER: 2 })
-  } else {
-    roleConfig.WOLF = Math.min(Math.floor(totalPlayers / 3), 3)
-    roleConfig.SEER = 1
-    roleConfig.WITCH = 1
-    roleConfig.GUARD = 1
-    roleConfig.HUNTER = 1
-    roleConfig.VILLAGER = Math.max(0, totalPlayers - roleConfig.WOLF - 4)
-    const assigned = Object.values(roleConfig).reduce((sum, count) => sum + count, 0)
-    roleConfig.VILLAGER += Math.max(0, totalPlayers - assigned)
-  }
-
-  config.value.roleConfig = roleConfig
+  config.value.roleConfig = buildRecommendedRoleConfig(totalPlayers)
   updateVillagerCount()
-}
-
-const getModelId = (model) => {
-  if (typeof model === 'string') return model
-  return model?.id || model?.name || model?.model || ''
-}
-
-const getModelLabel = (model) => {
-  if (typeof model === 'string') return model
-  return model?.label || getModelId(model)
 }
 
 const createGame = async () => {
@@ -484,15 +406,9 @@ const createGame = async () => {
   
   loading.value = true
   try {
-    // Build seat model map (filter out empty values)
-    const seatModelMap = {}
-    if (!config.value.aiConfig.randomModel) {
-      for (const [seat, model] of Object.entries(config.value.seatModelMap)) {
-        if (model) {
-          seatModelMap[parseInt(seat)] = model
-        }
-      }
-    }
+    const seatModelMap = !config.value.aiConfig.randomModel
+      ? buildSeatModelMap(config.value.seatModelMap)
+      : {}
     
     const response = await gameApi.create({
       total_players: config.value.totalPlayers,
@@ -517,44 +433,11 @@ const createGame = async () => {
   }
 }
 
-// 默认数据 - 包含所有角色
-const defaultRoles = [
-  // 狼人阵营
-  { code: 'WOLF', name: '狼人', camp: '狼人阵营', icon: '🐺' },
-  { code: 'WOLF_KING', name: '狼王', camp: '狼人阵营', icon: '👑' },
-  { code: 'WHITE_WOLF', name: '白狼王', camp: '狼人阵营', icon: '🐺' },
-  { code: 'BEAUTY', name: '狼美人', camp: '狼人阵营', icon: '💋' },
-  // 好人阵营 - 神职
-  { code: 'SEER', name: '预言家', camp: '好人阵营', icon: '🔮' },
-  { code: 'WITCH', name: '女巫', camp: '好人阵营', icon: '🧙‍♀️' },
-  { code: 'GUARD', name: '守卫', camp: '好人阵营', icon: '🛡️' },
-  { code: 'HUNTER', name: '猎人', camp: '好人阵营', icon: '🏹' },
-  { code: 'FOX', name: '狐狸', camp: '好人阵营', icon: '🦊' },
-  { code: 'ANGEL', name: '天使', camp: '第三方阵营', icon: '😇' },
-  { code: 'SCAPEGOAT', name: '替罪羊', camp: '好人阵营', icon: '🐐' },
-  { code: 'MASON', name: '共济会', camp: '好人阵营', icon: '🤝' },
-  { code: 'SUPER_SAINT', name: '圣徒', camp: '好人阵营', icon: '⛪' },
-  { code: 'CUPID', name: '丘比特', camp: '好人阵营', icon: '💘' },
-  { code: 'IDIOT', name: '白痴', camp: '好人阵营', icon: '🤪' },
-  { code: 'ELDER', name: '长老', camp: '好人阵营', icon: '👴' },
-  { code: 'WILD_CHILD', name: '野孩子', camp: '好人阵营', icon: '🧒' },
-  { code: 'CURSED', name: '被诅咒者', camp: '好人阵营', icon: '🕯️' },
-  { code: 'BLESSED', name: '受祝福者', camp: '好人阵营', icon: '✨' },
-  // 好人阵营 - 平民
-  { code: 'VILLAGER', name: '村民', camp: '好人阵营', icon: '👨‍🌾' }
-]
-
-const defaultModels = [
-  { id: 'bl-DeepSeek-V3-250324', label: 'bl-DeepSeek-V3-250324' },
-  { id: 'bl-DeepSeek-V3.1', label: 'bl-DeepSeek-V3.1' },
-  { id: 'bl-DeepSeek-V3.2-Exp', label: 'bl-DeepSeek-V3.2-Exp' }
-]
-
 onMounted(async () => {
   applyRecommendedSetup(config.value.totalPlayers)
   // 先设置默认值
-  roles.value = defaultRoles
-  models.value = defaultModels
+  roles.value = DEFAULT_ROLES
+  models.value = DEFAULT_MODELS
   
   try {
     const [rolesRes, modelsRes] = await Promise.all([
